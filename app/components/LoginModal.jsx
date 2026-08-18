@@ -4,6 +4,8 @@ import { useIsMobile } from '@/app/hooks/useIsMobile';
 import Image from 'next/image';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
+
+const EMAIL_OTP_LENGTH = 8;
 import { MailIcon } from './Icons';
 import githubImg from '../assets/github.svg';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
@@ -75,8 +77,8 @@ export default function LoginModal({ onClose, showToast, isExplicitLoginRef, ini
 
   const handleVerifyEmailOtp = async () => {
     setLoginError('');
-    if (!loginOtp || loginOtp.length < 4) {
-      setLoginError('请输入邮箱中的验证码');
+    if (!loginOtp || loginOtp.length !== EMAIL_OTP_LENGTH) {
+      setLoginError(`请输入邮箱中的 ${EMAIL_OTP_LENGTH} 位验证码`);
       return;
     }
     if (!isSupabaseConfigured) {
@@ -216,7 +218,7 @@ export default function LoginModal({ onClose, showToast, isExplicitLoginRef, ini
                   请输入邮箱验证码以完成注册/登录
                 </div>
                 <InputOTP
-                  maxLength={6}
+                  maxLength={EMAIL_OTP_LENGTH}
                   value={loginOtp}
                   onChange={(value) => setLoginOtp(value)}
                   disabled={loginLoading}
@@ -226,12 +228,9 @@ export default function LoginModal({ onClose, showToast, isExplicitLoginRef, ini
                   enterKeyHint="done"
                 >
                   <InputOTPGroup>
-                    <InputOTPSlot index={0} />
-                    <InputOTPSlot index={1} />
-                    <InputOTPSlot index={2} />
-                    <InputOTPSlot index={3} />
-                    <InputOTPSlot index={4} />
-                    <InputOTPSlot index={5} />
+                    {Array.from({ length: EMAIL_OTP_LENGTH }, (_, index) => (
+                      <InputOTPSlot key={index} index={index} />
+                    ))}
                   </InputOTPGroup>
                 </InputOTP>
               </div>
