@@ -1,7 +1,7 @@
 import { analyzeFundPortfolio, normalizeFundWatchProfile } from '../app/lib/fundDecisionEngine.mjs';
 import { collectFundOnlineInfo, onlineInfoImpactForFund } from '../app/lib/fundOnlineInfo.mjs';
 
-const REQUIRED_ENV = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'FUND_WATCH_USER_ID', 'SERVERCHAN_SENDKEY'];
+const REQUIRED_ENV = ['SUPABASE_URL', 'FUND_WATCH_USER_ID', 'SERVERCHAN_SENDKEY'];
 const VALUATION_FIELDS = 'FCODE,SHORTNAME,GSZZL,GZTIME,GSZ,NAV,PDATE';
 const REPORT_MODE = process.env.REPORT_MODE === 'preclose' ? 'preclose' : 'evening';
 const FORCE_SEND = process.env.FORCE_SEND === 'true';
@@ -9,9 +9,25 @@ const TIME_ZONE = 'Asia/Shanghai';
 
 function requireEnvironment() {
   const missing = REQUIRED_ENV.filter((key) => !String(process.env[key] || '').trim());
+  if (!String(process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()) {
+    missing.push('SUPABASE_SECRET_KEY');
+  }
   if (missing.length > 0) {
     throw new Error(`缺少 GitHub Actions 加密变量：${missing.join(', ')}`);
   }
+}
+
+function supabaseAdminKey() {
+  return String(process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+}
+
+function supabaseAdminHeaders(extra = {}) {
+  const key = supabaseAdminKey();
+  return {
+    apikey: key,
+    ...(key.startsWith('sb_secret_') ? {} : { Authorization: `Bearer ${key}` }),
+    ...extra
+  };
 }
 
 function finiteNumber(value) {
@@ -53,16 +69,11 @@ async function fetchJson(url, options, label) {
 async function loadUserPayload() {
   const supabaseUrl = process.env.SUPABASE_URL.replace(/\/$/, '');
   const userId = encodeURIComponent(process.env.FUND_WATCH_USER_ID.trim());
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY.trim();
   const url = `${supabaseUrl}/rest/v1/user_configs?select=data&user_id=eq.${userId}&limit=1`;
   const rows = await fetchJson(
     url,
     {
-      headers: {
-        apikey: serviceKey,
-        Authorization: `Bearer ${serviceKey}`,
-        Accept: 'application/json'
-      }
+      headers: supabaseAdminHeaders({ Accept: 'application/json' })
     },
     'Supabase 同步数据'
   );
@@ -75,18 +86,13 @@ async function loadUserPayload() {
 async function hasReportBeenSent(reportDate, reportMode) {
   const supabaseUrl = process.env.SUPABASE_URL.replace(/\/$/, '');
   const userId = encodeURIComponent(process.env.FUND_WATCH_USER_ID.trim());
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY.trim();
   const url =
     `${supabaseUrl}/rest/v1/fund_watch_reports?select=id&user_id=eq.${userId}` +
     `&report_date=eq.${encodeURIComponent(reportDate)}&report_mode=eq.${encodeURIComponent(reportMode)}&limit=1`;
   const rows = await fetchJson(
     url,
     {
-      headers: {
-        apikey: serviceKey,
-        Authorization: `Bearer ${serviceKey}`,
-        Accept: 'application/json'
-      }
+      headers: supabaseAdminHeaders({ Accept: 'application/json' })
     },
     '提醒发送记录'
   );
@@ -95,17 +101,14 @@ async function hasReportBeenSent(reportDate, reportMode) {
 
 async function recordReportSent(reportDate, reportMode, reportData) {
   const supabaseUrl = process.env.SUPABASE_URL.replace(/\/$/, '');
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY.trim();
   const response = await fetch(
     `${supabaseUrl}/rest/v1/fund_watch_reports?on_conflict=user_id,report_date,report_mode`,
     {
       method: 'POST',
-      headers: {
-        apikey: serviceKey,
-        Authorization: `Bearer ${serviceKey}`,
+      headers: supabaseAdminHeaders({
         'Content-Type': 'application/json',
         Prefer: 'resolution=merge-duplicates,return=minimal'
-      },
+      }),
       body: JSON.stringify({
         user_id: process.env.FUND_WATCH_USER_ID.trim(),
         report_date: reportDate,
@@ -294,14 +297,22 @@ function buildReport(analysis, mode, today, nowTime, freshCount, onlineInfo) {
         : onlineInfo.sourceStatus === 'partial'
           ? '部分公开信息源读取失败'
           : '公开信息源读取正常';
+  const summaryLines = analysis.profile.includeAmountsInNotifications
+    ? [
+        `- 持仓市值：${money(analysis.marketValue)}，持仓收益率：${percent(analysis.profitPct)}`,
+        `- 今日估算影响：${money(analysis.dayEstimate)}，风险警戒线：-${analysis.profile.riskLossLimit}%`,
+        `- 可用计划资金：${money(analysis.availableBudget)}，需关注项目：${analysis.alertCount}项`
+      ]
+    : [
+        `- 风险警戒线：-${analysis.profile.riskLossLimit}%，需关注项目：${analysis.alertCount}项`,
+        '- 隐私保护：已隐藏持仓市值、个人收益、仓位、当日金额变化和可用资金'
+      ];
   const lines = [
     `# 基金守望 · ${reportName}`,
     '',
     `- 分析时间：${today} ${nowTime}（北京时间）`,
     `- 数据新鲜度：${freshCount}/${analysis.fundCount}只为当日数据，结论置信度${confidence}`,
-    `- 持仓市值：${money(analysis.marketValue)}，持仓收益率：${percent(analysis.profitPct)}`,
-    `- 今日估算影响：${money(analysis.dayEstimate)}，风险警戒线：-${analysis.profile.riskLossLimit}%`,
-    `- 可用计划资金：${money(analysis.availableBudget)}，需关注项目：${analysis.alertCount}项`,
+    ...summaryLines,
     `- 公开信息：检查${onlineInfo.checkedFundCount}只持仓，收集${onlineInfo.collectedCount}条，筛出${onlineInfo.usefulCount}条有用信息（${sourceStatusText}）`,
     '',
     '## 今日参考动作',
@@ -317,7 +328,11 @@ function buildReport(analysis, mode, today, nowTime, freshCount, onlineInfo) {
       lines.push(`- 参考动作：**${item.finalAction}**`);
       lines.push(`- 触发原因：${item.reasons.slice(0, 3).join('；')}`);
       if (item.onlineImpact) lines.push(`- 公开信息影响：${item.onlineImpact.reason}`);
-      lines.push(`- 当前仓位：${percent(item.positionPct)}，持仓收益：${percent(item.profitPct)}，${trend}`);
+      if (analysis.profile.includeAmountsInNotifications) {
+        lines.push(`- 当前仓位：${percent(item.positionPct)}，持仓收益：${percent(item.profitPct)}，${trend}`);
+      } else {
+        lines.push(`- 隐私保护：已隐藏个人仓位和持仓收益；${trend}`);
+      }
       lines.push(`- 时间提示：${item.tradeWindow}`);
       lines.push('');
     });

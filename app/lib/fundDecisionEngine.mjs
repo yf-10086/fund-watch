@@ -11,6 +11,7 @@ export const DEFAULT_FUND_WATCH_PROFILE = Object.freeze({
   enablePreCloseReminder: true,
   enableEveningReport: true,
   enableOnlineInfoAnalysis: true,
+  includeAmountsInNotifications: false,
   reminderChannel: 'wechat'
 });
 
@@ -82,6 +83,7 @@ export function normalizeFundWatchProfile(value) {
   next.enablePreCloseReminder = next.enablePreCloseReminder !== false;
   next.enableEveningReport = next.enableEveningReport !== false;
   next.enableOnlineInfoAnalysis = next.enableOnlineInfoAnalysis !== false;
+  next.includeAmountsInNotifications = next.includeAmountsInNotifications === true;
   next.reminderChannel = ['wechat', 'browser', 'none'].includes(next.reminderChannel)
     ? next.reminderChannel
     : DEFAULT_FUND_WATCH_PROFILE.reminderChannel;

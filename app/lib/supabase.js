@@ -1,8 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+const supabasePublishableKey =
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+export const isSupabaseConfigured = Boolean(supabaseUrl && supabasePublishableKey);
 
 const createNoopChannel = () => {
   const channel = {
@@ -47,7 +48,7 @@ const createNoopSupabase = () => ({
 });
 
 export const supabase = isSupabaseConfigured
-  ? createClient(supabaseUrl, supabaseAnonKey, {
+  ? createClient(supabaseUrl, supabasePublishableKey, {
       auth: {
         // 启用自动刷新 token
         autoRefreshToken: true,

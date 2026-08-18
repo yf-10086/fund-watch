@@ -70,7 +70,8 @@ npm run dev -- --hostname 127.0.0.1
 - Supabase启用行级安全，每个登录用户只能读取自己的配置。
 - 每日任务使用指定的用户UUID读取数据，不遍历全部用户。
 - 持仓金额和基金明细不会打印到GitHub Actions日志。
-- Supabase `service_role` 和 Server酱 SendKey只允许保存在GitHub Actions加密变量中。
+- Supabase `Secret key` 和 Server酱 SendKey只允许保存在GitHub Actions加密变量中。
+- 微信提醒默认隐藏持仓金额、个人收益和仓位；只有你主动开启设置时才发送这些信息。
 - 默认不启用Google Analytics；已移除原项目的Sentry会话上报。
 - GitHub Pages页面可以公开访问，但没有你的登录会话就不能读取你的Supabase持仓。
 

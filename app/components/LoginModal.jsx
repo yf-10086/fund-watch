@@ -8,6 +8,8 @@ import { MailIcon } from './Icons';
 import githubImg from '../assets/github.svg';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
+const allowEmailSignup = process.env.NEXT_PUBLIC_ALLOW_EMAIL_SIGNUP === 'true';
+
 export default function LoginModal({ onClose, showToast, isExplicitLoginRef, initialError = '' }) {
   const isMobile = useIsMobile();
   const [loginEmail, setLoginEmail] = useState('');
@@ -49,7 +51,7 @@ export default function LoginModal({ onClose, showToast, isExplicitLoginRef, ini
       const { error } = await supabase.auth.signInWithOtp({
         email: loginEmail.trim(),
         options: {
-          shouldCreateUser: true
+          shouldCreateUser: allowEmailSignup
         }
       });
       if (error) throw error;

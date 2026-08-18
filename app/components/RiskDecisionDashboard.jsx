@@ -237,6 +237,14 @@ export default function RiskDecisionDashboard({
               onChange={(event) => updateDraft('enableOnlineInfoAnalysis', event.target.checked)}
             />
           </label>
+          <label className="decision-profile__toggle">
+            <span>微信通知显示金额</span>
+            <input
+              type="checkbox"
+              checked={draft.includeAmountsInNotifications}
+              onChange={(event) => updateDraft('includeAmountsInNotifications', event.target.checked)}
+            />
+          </label>
           <button type="button" className="button decision-profile__save" onClick={saveProfile}>
             保存设置
           </button>

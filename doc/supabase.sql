@@ -79,6 +79,7 @@ begin
 end;
 $$;
 
+REVOKE ALL ON FUNCTION public.update_user_config_full(jsonb, text, boolean) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.update_user_config_full(jsonb, text, boolean) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.update_user_config_full(jsonb, text, boolean) TO service_role;
 
@@ -122,6 +123,7 @@ CREATE OR REPLACE FUNCTION public.get_ytd_percentile(p_ytd_rate numeric)
 RETURNS numeric
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 DECLARE
   total_count int;
@@ -138,9 +140,11 @@ BEGIN
 END;
 $$;
 
+REVOKE ALL ON FUNCTION public.get_ytd_percentile(numeric) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_ytd_percentile(numeric) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_ytd_percentile(numeric) TO service_role;
 
+REVOKE ALL ON FUNCTION public.update_user_config_partial(jsonb, text, boolean) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.update_user_config_partial(jsonb, text, boolean) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.update_user_config_partial(jsonb, text, boolean) TO service_role;
 
@@ -320,5 +324,6 @@ begin
 end;
 $$;
 
+REVOKE ALL ON FUNCTION public.check_and_increment_ocr_usage(int) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.check_and_increment_ocr_usage(int) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.check_and_increment_ocr_usage(int) TO service_role;
