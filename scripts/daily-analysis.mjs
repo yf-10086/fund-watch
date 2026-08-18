@@ -1,0 +1,383 @@
+import { analyzeFundPortfolio, normalizeFundWatchProfile } from '../app/lib/fundDecisionEngine.mjs';
+
+const REQUIRED_ENV = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'FUND_WATCH_USER_ID', 'SERVERCHAN_SENDKEY'];
+const VALUATION_FIELDS = 'FCODE,SHORTNAME,GSZZL,GZTIME,GSZ,NAV,PDATE';
+const REPORT_MODE = process.env.REPORT_MODE === 'preclose' ? 'preclose' : 'evening';
+const FORCE_SEND = process.env.FORCE_SEND === 'true';
+const TIME_ZONE = 'Asia/Shanghai';
+
+function requireEnvironment() {
+  const missing = REQUIRED_ENV.filter((key) => !String(process.env[key] || '').trim());
+  if (missing.length > 0) {
+    throw new Error(`缺少 GitHub Actions 加密变量：${missing.join(', ')}`);
+  }
+}
+
+function finiteNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function dateParts(date = new Date()) {
+  const formatter = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  });
+  const parts = Object.fromEntries(formatter.formatToParts(date).map((item) => [item.type, item.value]));
+  return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    time: `${parts.hour}:${parts.minute}`,
+    hour: Number(parts.hour),
+    minute: Number(parts.minute)
+  };
+}
+
+async function fetchJson(url, options, label) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    if (!response.ok) throw new Error(`${label} HTTP ${response.status}`);
+    return await response.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function loadUserPayload() {
+  const supabaseUrl = process.env.SUPABASE_URL.replace(/\/$/, '');
+  const userId = encodeURIComponent(process.env.FUND_WATCH_USER_ID.trim());
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY.trim();
+  const url = `${supabaseUrl}/rest/v1/user_configs?select=data&user_id=eq.${userId}&limit=1`;
+  const rows = await fetchJson(
+    url,
+    {
+      headers: {
+        apikey: serviceKey,
+        Authorization: `Bearer ${serviceKey}`,
+        Accept: 'application/json'
+      }
+    },
+    'Supabase 同步数据'
+  );
+  if (!Array.isArray(rows) || !rows[0]?.data) {
+    throw new Error('没有找到该用户的同步数据，请先在基金守望登录并完成一次云同步');
+  }
+  return rows[0].data;
+}
+
+async function hasReportBeenSent(reportDate, reportMode) {
+  const supabaseUrl = process.env.SUPABASE_URL.replace(/\/$/, '');
+  const userId = encodeURIComponent(process.env.FUND_WATCH_USER_ID.trim());
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY.trim();
+  const url =
+    `${supabaseUrl}/rest/v1/fund_watch_reports?select=id&user_id=eq.${userId}` +
+    `&report_date=eq.${encodeURIComponent(reportDate)}&report_mode=eq.${encodeURIComponent(reportMode)}&limit=1`;
+  const rows = await fetchJson(
+    url,
+    {
+      headers: {
+        apikey: serviceKey,
+        Authorization: `Bearer ${serviceKey}`,
+        Accept: 'application/json'
+      }
+    },
+    '提醒发送记录'
+  );
+  return Array.isArray(rows) && rows.length > 0;
+}
+
+async function recordReportSent(reportDate, reportMode) {
+  const supabaseUrl = process.env.SUPABASE_URL.replace(/\/$/, '');
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY.trim();
+  const response = await fetch(
+    `${supabaseUrl}/rest/v1/fund_watch_reports?on_conflict=user_id,report_date,report_mode`,
+    {
+      method: 'POST',
+      headers: {
+        apikey: serviceKey,
+        Authorization: `Bearer ${serviceKey}`,
+        'Content-Type': 'application/json',
+        Prefer: 'resolution=merge-duplicates,return=minimal'
+      },
+      body: JSON.stringify({
+        user_id: process.env.FUND_WATCH_USER_ID.trim(),
+        report_date: reportDate,
+        report_mode: reportMode,
+        sent_at: new Date().toISOString()
+      })
+    }
+  );
+  if (!response.ok) throw new Error(`写入提醒发送记录失败 HTTP ${response.status}`);
+}
+
+function isReportDue(profile, mode, now) {
+  if (FORCE_SEND) return true;
+  if (mode === 'evening') return now.hour >= profile.eveningReportHour;
+  const minutesUntilCutoff = 15 * 60 - (now.hour * 60 + now.minute);
+  return minutesUntilCutoff >= 0 && minutesUntilCutoff <= profile.reminderLeadMinutes;
+}
+
+function mergeHoldings(payload) {
+  const buckets = [payload?.holdings, ...Object.values(payload?.groupHoldings || {})];
+  const totals = new Map();
+  for (const bucket of buckets) {
+    if (!bucket || typeof bucket !== 'object' || Array.isArray(bucket)) continue;
+    for (const [rawCode, holding] of Object.entries(bucket)) {
+      const code = String(rawCode).trim();
+      const share = finiteNumber(holding?.share);
+      const cost = finiteNumber(holding?.cost);
+      if (!code || share == null || share <= 0) continue;
+      const current = totals.get(code) || { share: 0, totalCost: 0, hasCost: false };
+      current.share += share;
+      if (cost != null && cost >= 0) {
+        current.totalCost += cost * share;
+        current.hasCost = true;
+      }
+      totals.set(code, current);
+    }
+  }
+  return Object.fromEntries(
+    [...totals.entries()].map(([code, value]) => [
+      code,
+      {
+        share: value.share,
+        cost: value.hasCost && value.share > 0 ? value.totalCost / value.share : null
+      }
+    ])
+  );
+}
+
+function chunks(values, size) {
+  const result = [];
+  for (let index = 0; index < values.length; index += size) result.push(values.slice(index, index + size));
+  return result;
+}
+
+async function fetchLatestValuations(codes) {
+  const results = [];
+  for (const batch of chunks(codes, 40)) {
+    const url =
+      'https://fundcomapi.tiantianfunds.com/mm/newCore/FundValuationLast' +
+      `?FCODES=${encodeURIComponent(batch.join(','))}&FIELDS=${encodeURIComponent(VALUATION_FIELDS)}`;
+    const json = await fetchJson(url, { headers: { Accept: 'application/json' } }, '基金估值');
+    if (!json?.success || !Array.isArray(json.data)) throw new Error('基金估值接口返回了无效数据');
+    for (const item of json.data) {
+      const code = String(item?.FCODE || '').trim();
+      if (!code) continue;
+      results.push({
+        code,
+        name: String(item?.SHORTNAME || '').trim(),
+        gsz: finiteNumber(item?.GSZ),
+        gszzl: finiteNumber(item?.GSZZL),
+        dwjz: finiteNumber(item?.NAV),
+        gztime: item?.GZTIME ? String(item.GZTIME) : null,
+        jzrq: item?.PDATE ? String(item.PDATE) : null
+      });
+    }
+  }
+  return results;
+}
+
+function calculateTrend(points) {
+  const valid = (Array.isArray(points) ? points : [])
+    .map((item) => ({ x: finiteNumber(item?.x), y: finiteNumber(item?.y) }))
+    .filter((item) => item.x != null && item.y != null && item.y > 0)
+    .sort((a, b) => a.x - b.x);
+  if (valid.length < 3) return {};
+
+  const latest = valid[valid.length - 1].y;
+  const returnFor = (count) => {
+    if (valid.length <= count) return null;
+    const start = valid[valid.length - 1 - count].y;
+    return start > 0 ? ((latest - start) / start) * 100 : null;
+  };
+  const recent = valid.slice(-60);
+  let peak = recent[0].y;
+  let maxDrawdown60 = 0;
+  for (const item of recent) {
+    peak = Math.max(peak, item.y);
+    maxDrawdown60 = Math.min(maxDrawdown60, ((item.y - peak) / peak) * 100);
+  }
+
+  let consecutiveDirection = null;
+  let consecutiveDays = 0;
+  for (let index = valid.length - 1; index > 0; index -= 1) {
+    const direction = valid[index].y > valid[index - 1].y ? 'up' : valid[index].y < valid[index - 1].y ? 'down' : null;
+    if (!direction) break;
+    if (consecutiveDirection && consecutiveDirection !== direction) break;
+    consecutiveDirection = direction;
+    consecutiveDays += 1;
+  }
+  return {
+    return20: returnFor(20),
+    return60: returnFor(60),
+    maxDrawdown60,
+    consecutiveDirection,
+    consecutiveDays
+  };
+}
+
+async function fetchFundTrend(code) {
+  const url = `https://fund.eastmoney.com/pingzhongdata/${encodeURIComponent(code)}.js`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) return {};
+    const script = await response.text();
+    const match = script.match(/Data_netWorthTrend\s*=\s*(\[[\s\S]*?\]);/);
+    if (!match) return {};
+    return calculateTrend(JSON.parse(match[1]));
+  } catch {
+    return {};
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function mapWithConcurrency(values, limit, mapper) {
+  const result = new Array(values.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < values.length) {
+      const index = cursor;
+      cursor += 1;
+      result[index] = await mapper(values[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, values.length) }, () => worker()));
+  return result;
+}
+
+function percent(value, digits = 1) {
+  return value == null || !Number.isFinite(Number(value)) ? '暂无' : `${Number(value).toFixed(digits)}%`;
+}
+
+function money(value) {
+  return new Intl.NumberFormat('zh-CN', {
+    style: 'currency',
+    currency: 'CNY',
+    maximumFractionDigits: 0
+  }).format(Number(value) || 0);
+}
+
+function isFreshValuation(fund, today) {
+  return String(fund?.gztime || fund?.jzrq || '').startsWith(today);
+}
+
+function buildReport(analysis, mode, today, nowTime, freshCount) {
+  const reportName = mode === 'preclose' ? '交易窗口复核' : '晚间持仓日报';
+  const confidence = freshCount === analysis.fundCount ? '较高' : freshCount > 0 ? '中等' : '较低';
+  const rows = analysis.decisions.filter((item) => item.hasHolding).slice(0, mode === 'preclose' ? 5 : 8);
+  const lines = [
+    `# 基金守望 · ${reportName}`,
+    '',
+    `- 分析时间：${today} ${nowTime}（北京时间）`,
+    `- 数据新鲜度：${freshCount}/${analysis.fundCount}只为当日数据，结论置信度${confidence}`,
+    `- 持仓市值：${money(analysis.marketValue)}，持仓收益率：${percent(analysis.profitPct)}`,
+    `- 今日估算影响：${money(analysis.dayEstimate)}，风险警戒线：-${analysis.profile.riskLossLimit}%`,
+    `- 可用计划资金：${money(analysis.availableBudget)}，需关注项目：${analysis.alertCount}项`,
+    '',
+    '## 今日参考动作',
+    ''
+  ];
+
+  if (rows.length === 0) {
+    lines.push('尚未读到有效持仓。请先在基金守望中录入份额和成本，并完成一次云同步。');
+  } else {
+    rows.forEach((item, index) => {
+      const trend = `当日${percent(item.dayChange, 2)} / 20日${percent(item.return20)} / 60日${percent(item.return60)}`;
+      lines.push(`### ${index + 1}. ${item.name}（${item.code}）`);
+      lines.push(`- 参考动作：**${item.action}**`);
+      lines.push(`- 触发原因：${item.reasons.slice(0, 3).join('；')}`);
+      lines.push(`- 当前仓位：${percent(item.positionPct)}，持仓收益：${percent(item.profitPct)}，${trend}`);
+      lines.push(`- 时间提示：${item.tradeWindow}`);
+      lines.push('');
+    });
+  }
+
+  lines.push('## 使用边界');
+  lines.push(
+    '该结果是个人决策辅助，不预测确定涨跌、不自动交易。公开估值、QDII时差、汇率和平台规则可能造成偏差，最终以支付宝页面为准。'
+  );
+  return { title: `基金守望：${reportName} · ${analysis.alertCount}项需关注`, markdown: lines.join('\n') };
+}
+
+async function sendServerChan(title, markdown) {
+  const sendKey = process.env.SERVERCHAN_SENDKEY.trim();
+  const response = await fetch(`https://sctapi.ftqq.com/${encodeURIComponent(sendKey)}.send`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+    body: new URLSearchParams({ title, desp: markdown })
+  });
+  if (!response.ok) throw new Error(`微信提醒 HTTP ${response.status}`);
+  const result = await response.json();
+  if (Number(result?.code) !== 0) throw new Error(`微信提醒失败：${result?.message || result?.code || '未知错误'}`);
+}
+
+async function main() {
+  requireEnvironment();
+  const payload = await loadUserPayload();
+  const profile = normalizeFundWatchProfile(payload?.customSettings?.fundWatchProfile);
+  if (REPORT_MODE === 'preclose' && !profile.enablePreCloseReminder) {
+    console.log('已按个人设置跳过交易截止前提醒。');
+    return;
+  }
+  if (REPORT_MODE === 'evening' && !profile.enableEveningReport) {
+    console.log('已按个人设置跳过晚间日报。');
+    return;
+  }
+
+  const now = dateParts();
+  if (!isReportDue(profile, REPORT_MODE, now)) {
+    console.log('尚未到个人设置的提醒时间，本轮检查结束。');
+    return;
+  }
+  if (!FORCE_SEND && (await hasReportBeenSent(now.date, REPORT_MODE))) {
+    console.log('今天同类提醒已经发送，本轮不重复推送。');
+    return;
+  }
+
+  const holdings = mergeHoldings(payload);
+  const storedFunds = Array.isArray(payload?.funds) ? payload.funds : [];
+  const codes = [
+    ...new Set([...storedFunds.map((item) => String(item?.code || '').trim()), ...Object.keys(holdings)])
+  ].filter(Boolean);
+  if (codes.length === 0) throw new Error('同步数据中没有基金代码，请先添加或截图导入基金');
+
+  let latestFunds = [];
+  try {
+    latestFunds = await fetchLatestValuations(codes);
+  } catch (error) {
+    console.warn(`最新估值读取失败，将使用同步缓存：${error.message}`);
+  }
+  const storedMap = new Map(storedFunds.map((fund) => [String(fund?.code || '').trim(), fund]));
+  const latestMap = new Map(latestFunds.map((fund) => [fund.code, fund]));
+  const funds = codes.map((code) => ({ ...(storedMap.get(code) || {}), ...(latestMap.get(code) || {}), code }));
+
+  const heldCodes = Object.keys(holdings).slice(0, 30);
+  const trendRows = await mapWithConcurrency(heldCodes, 5, async (code) => [code, await fetchFundTrend(code)]);
+  const trends = Object.fromEntries(trendRows);
+  const analysis = analyzeFundPortfolio({ funds, holdings, profile, trends });
+  const freshCount = funds.filter((fund) => isFreshValuation(fund, now.date)).length;
+
+  if (REPORT_MODE === 'preclose' && freshCount === 0) {
+    console.log('未检测到当日估值，按非交易日或数据未更新处理，跳过交易窗口提醒。');
+    return;
+  }
+  const report = buildReport(analysis, REPORT_MODE, now.date, now.time, freshCount);
+  await sendServerChan(report.title, report.markdown);
+  if (!FORCE_SEND) await recordReportSent(now.date, REPORT_MODE);
+  console.log(`基金守望${REPORT_MODE === 'preclose' ? '交易窗口提醒' : '晚间日报'}已发送；未在日志输出持仓明细。`);
+}
+
+main().catch((error) => {
+  console.error(`每日分析失败：${error.message}`);
+  process.exitCode = 1;
+});
