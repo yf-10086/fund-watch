@@ -5,8 +5,8 @@ on:
     # GitHub Actions 使用 UTC。交易窗口每10分钟检查一次，实际只按页面设置推送一次。
     - cron: '*/10 4-6 * * 1-5'
     - cron: '55 6 * * 1-5'
-    # 北京时间18:10-23:10每小时检查，按页面设置的晚报小时只推送一次。
-    - cron: '10 10-15 * * 1-5'
+    # 北京时间18:10-23:10每天检查；周末也会筛选公告和新闻，按设置的晚报小时只推送一次。
+    - cron: '10 10-15 * * *'
   workflow_dispatch:
     inputs:
       report_mode:
@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      REPORT_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.report_mode || (github.event.schedule == '10 10-15 * * 1-5' && 'evening' || 'preclose') }}
+      REPORT_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.report_mode || (github.event.schedule == '10 10-15 * * *' && 'evening' || 'preclose') }}
       FORCE_SEND: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

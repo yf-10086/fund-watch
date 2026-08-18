@@ -59,6 +59,7 @@ import { useScanImport } from './hooks/useScanImport';
 import { useRefreshManager } from './hooks/useRefreshManager';
 import { useSyncManager, normalizeFundDailyEarningsScoped } from './hooks/useSyncManager';
 import { useIsMobile } from './hooks/useIsMobile';
+import { useLatestFundWatchReport } from './hooks/useLatestFundWatchReport';
 import {
   useUserStore,
   clearAuthUser,
@@ -262,6 +263,7 @@ export default function HomePage() {
 
   // 用户认证状态（Supabase 会话仍由客户端持久化；用户信息由 zustand 全局管理）
   const user = useUserStore((s) => s.user);
+  const latestFundWatchReportState = useLatestFundWatchReport(user?.id);
   const userAvatar = useMemo(() => {
     if (!user?.id) return '';
     return createAvatar(identicon, {
@@ -5111,6 +5113,7 @@ export default function HomePage() {
                   onProfileChange={handleFundWatchProfileChange}
                   settingsOpen={fundWatchSettingsOpen}
                   onSettingsOpenChange={setFundWatchSettingsOpen}
+                  latestReportState={latestFundWatchReportState}
                 />
 
                 {scopedFunds.length === 0 && !(currentTab === SUMMARY_TAB_ID && showPortfolioSummaryTab) ? (

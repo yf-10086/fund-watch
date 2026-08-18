@@ -1,4 +1,5 @@
 import { analyzeFundPortfolio, normalizeFundWatchProfile } from '../app/lib/fundDecisionEngine.mjs';
+import { collectFundOnlineInfo, onlineInfoImpactForFund } from '../app/lib/fundOnlineInfo.mjs';
 
 const REQUIRED_ENV = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'FUND_WATCH_USER_ID', 'SERVERCHAN_SENDKEY'];
 const VALUATION_FIELDS = 'FCODE,SHORTNAME,GSZZL,GZTIME,GSZ,NAV,PDATE';
@@ -92,7 +93,7 @@ async function hasReportBeenSent(reportDate, reportMode) {
   return Array.isArray(rows) && rows.length > 0;
 }
 
-async function recordReportSent(reportDate, reportMode) {
+async function recordReportSent(reportDate, reportMode, reportData) {
   const supabaseUrl = process.env.SUPABASE_URL.replace(/\/$/, '');
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY.trim();
   const response = await fetch(
@@ -109,6 +110,7 @@ async function recordReportSent(reportDate, reportMode) {
         user_id: process.env.FUND_WATCH_USER_ID.trim(),
         report_date: reportDate,
         report_mode: reportMode,
+        report_data: reportData,
         sent_at: new Date().toISOString()
       })
     }
@@ -271,10 +273,27 @@ function isFreshValuation(fund, today) {
   return String(fund?.gztime || fund?.jzrq || '').startsWith(today);
 }
 
-function buildReport(analysis, mode, today, nowTime, freshCount) {
+function buildReport(analysis, mode, today, nowTime, freshCount, onlineInfo) {
   const reportName = mode === 'preclose' ? '交易窗口复核' : '晚间持仓日报';
   const confidence = freshCount === analysis.fundCount ? '较高' : freshCount > 0 ? '中等' : '较低';
   const rows = analysis.decisions.filter((item) => item.hasHolding).slice(0, mode === 'preclose' ? 5 : 8);
+  const decisionRows = rows.map((item) => {
+    const onlineImpact = onlineInfoImpactForFund(onlineInfo.items, item.code);
+    return {
+      ...item,
+      baseAction: item.action,
+      finalAction: onlineImpact?.action || item.action,
+      onlineImpact
+    };
+  });
+  const sourceStatusText =
+    onlineInfo.sourceStatus === 'disabled'
+      ? '已按个人设置关闭'
+      : onlineInfo.sourceStatus === 'unavailable'
+        ? '公开信息源暂不可用'
+        : onlineInfo.sourceStatus === 'partial'
+          ? '部分公开信息源读取失败'
+          : '公开信息源读取正常';
   const lines = [
     `# 基金守望 · ${reportName}`,
     '',
@@ -283,6 +302,7 @@ function buildReport(analysis, mode, today, nowTime, freshCount) {
     `- 持仓市值：${money(analysis.marketValue)}，持仓收益率：${percent(analysis.profitPct)}`,
     `- 今日估算影响：${money(analysis.dayEstimate)}，风险警戒线：-${analysis.profile.riskLossLimit}%`,
     `- 可用计划资金：${money(analysis.availableBudget)}，需关注项目：${analysis.alertCount}项`,
+    `- 公开信息：检查${onlineInfo.checkedFundCount}只持仓，收集${onlineInfo.collectedCount}条，筛出${onlineInfo.usefulCount}条有用信息（${sourceStatusText}）`,
     '',
     '## 今日参考动作',
     ''
@@ -291,22 +311,69 @@ function buildReport(analysis, mode, today, nowTime, freshCount) {
   if (rows.length === 0) {
     lines.push('尚未读到有效持仓。请先在基金守望中录入份额和成本，并完成一次云同步。');
   } else {
-    rows.forEach((item, index) => {
+    decisionRows.forEach((item, index) => {
       const trend = `当日${percent(item.dayChange, 2)} / 20日${percent(item.return20)} / 60日${percent(item.return60)}`;
       lines.push(`### ${index + 1}. ${item.name}（${item.code}）`);
-      lines.push(`- 参考动作：**${item.action}**`);
+      lines.push(`- 参考动作：**${item.finalAction}**`);
       lines.push(`- 触发原因：${item.reasons.slice(0, 3).join('；')}`);
+      if (item.onlineImpact) lines.push(`- 公开信息影响：${item.onlineImpact.reason}`);
       lines.push(`- 当前仓位：${percent(item.positionPct)}，持仓收益：${percent(item.profitPct)}，${trend}`);
       lines.push(`- 时间提示：${item.tradeWindow}`);
       lines.push('');
     });
   }
 
+  lines.push('## 今日有用公开信息');
+  lines.push('');
+  if (onlineInfo.sourceStatus === 'disabled') {
+    lines.push('已按个人设置关闭公开信息分析，本报告只使用净值、趋势和仓位数据。');
+    lines.push('');
+  } else if (onlineInfo.sourceStatus === 'unavailable') {
+    lines.push('本次公开信息源暂时不可用，不能据此判断“今天没有重要事件”；请以基金正式公告为准。');
+    lines.push('');
+  } else if (onlineInfo.items.length === 0) {
+    lines.push('今天暂未筛出会改变持仓判断的重要公告或相关新闻；这不等于基金没有风险。');
+    lines.push('');
+  } else {
+    onlineInfo.items.slice(0, 8).forEach((item, index) => {
+      const levelName = { critical: '高风险', caution: '需关注', positive: '偏正面', info: '一般信息' }[item.level];
+      lines.push(`### ${index + 1}. ${item.fundName} · ${levelName}`);
+      lines.push(`- 信息：${item.title}`);
+      lines.push(`- 筛选原因：${item.why}`);
+      lines.push(`- 参考处理：${item.suggestion}`);
+      lines.push(`- 来源：[${item.source}](${item.url}) · ${item.publishedAt}`);
+      lines.push('');
+    });
+  }
+
   lines.push('## 使用边界');
   lines.push(
-    '该结果是个人决策辅助，不预测确定涨跌、不自动交易。公开估值、QDII时差、汇率和平台规则可能造成偏差，最终以支付宝页面为准。'
+    '该结果是个人决策辅助，不预测确定涨跌、不自动交易。标题关键词可能误判，必须打开原文核实；公开估值、QDII时差、汇率和平台规则也可能造成偏差，最终以基金正式公告和支付宝页面为准。'
   );
-  return { title: `基金守望：${reportName} · ${analysis.alertCount}项需关注`, markdown: lines.join('\n') };
+  return {
+    title: `基金守望：${reportName} · ${analysis.alertCount}项风险 / ${onlineInfo.usefulCount}条信息`,
+    markdown: lines.join('\n'),
+    data: {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      reportName,
+      checkedFundCount: onlineInfo.checkedFundCount,
+      collectedCount: onlineInfo.collectedCount,
+      usefulCount: onlineInfo.usefulCount,
+      sourceStatus: onlineInfo.sourceStatus,
+      successfulSourceCount: onlineInfo.successfulSourceCount,
+      failedSourceCount: onlineInfo.failedSourceCount,
+      insights: onlineInfo.items,
+      decisions: decisionRows.map((item) => ({
+        code: item.code,
+        name: item.name,
+        baseAction: item.baseAction,
+        finalAction: item.finalAction,
+        onlineLevel: item.onlineImpact?.level || null,
+        onlineReason: item.onlineImpact?.reason || null
+      }))
+    }
+  };
 }
 
 async function sendServerChan(title, markdown) {
@@ -366,14 +433,34 @@ async function main() {
   const trends = Object.fromEntries(trendRows);
   const analysis = analyzeFundPortfolio({ funds, holdings, profile, trends });
   const freshCount = funds.filter((fund) => isFreshValuation(fund, now.date)).length;
+  let onlineInfo = {
+    checkedFundCount: heldCodes.length,
+    collectedCount: 0,
+    usefulCount: 0,
+    sourceStatus: profile.enableOnlineInfoAnalysis ? 'unavailable' : 'disabled',
+    successfulSourceCount: 0,
+    failedSourceCount: 0,
+    items: []
+  };
+  if (profile.enableOnlineInfoAnalysis) {
+    const heldFundSet = new Set(heldCodes);
+    try {
+      onlineInfo = await collectFundOnlineInfo(
+        funds.filter((fund) => heldFundSet.has(fund.code)),
+        now.date
+      );
+    } catch (error) {
+      console.warn(`公开信息读取失败，本次继续使用净值和持仓分析：${error.message}`);
+    }
+  }
 
   if (REPORT_MODE === 'preclose' && freshCount === 0) {
     console.log('未检测到当日估值，按非交易日或数据未更新处理，跳过交易窗口提醒。');
     return;
   }
-  const report = buildReport(analysis, REPORT_MODE, now.date, now.time, freshCount);
+  const report = buildReport(analysis, REPORT_MODE, now.date, now.time, freshCount, onlineInfo);
   await sendServerChan(report.title, report.markdown);
-  if (!FORCE_SEND) await recordReportSent(now.date, REPORT_MODE);
+  await recordReportSent(now.date, REPORT_MODE, report.data);
   console.log(`基金守望${REPORT_MODE === 'preclose' ? '交易窗口提醒' : '晚间日报'}已发送；未在日志输出持仓明细。`);
 }
 

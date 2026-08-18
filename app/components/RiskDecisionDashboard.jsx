@@ -8,6 +8,7 @@ import {
   applyFundRiskMode,
   normalizeFundWatchProfile
 } from '../lib/fundDecisionEngine.mjs';
+import DailyOnlineInsights from './DailyOnlineInsights';
 
 const money = new Intl.NumberFormat('zh-CN', {
   style: 'currency',
@@ -25,7 +26,8 @@ export default function RiskDecisionDashboard({
   profile,
   onProfileChange,
   settingsOpen,
-  onSettingsOpenChange
+  onSettingsOpenChange,
+  latestReportState
 }) {
   const safeProfile = useMemo(() => normalizeFundWatchProfile(profile), [profile]);
   const analysis = useMemo(
@@ -227,6 +229,14 @@ export default function RiskDecisionDashboard({
               onChange={(event) => updateDraft('enableEveningReport', event.target.checked)}
             />
           </label>
+          <label className="decision-profile__toggle">
+            <span>每日公开信息分析</span>
+            <input
+              type="checkbox"
+              checked={draft.enableOnlineInfoAnalysis}
+              onChange={(event) => updateDraft('enableOnlineInfoAnalysis', event.target.checked)}
+            />
+          </label>
           <button type="button" className="button decision-profile__save" onClick={saveProfile}>
             保存设置
           </button>
@@ -320,6 +330,8 @@ export default function RiskDecisionDashboard({
           )}
         </div>
       </div>
+
+      <DailyOnlineInsights reportState={latestReportState} />
 
       <p className="decision-dashboard__notice">
         当前结论属于个人决策辅助，不承诺收益。估算净值、QDII时差和公开接口延迟都可能影响结果，最终交易须由你在支付宝确认。

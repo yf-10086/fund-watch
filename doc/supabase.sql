@@ -147,7 +147,7 @@ GRANT EXECUTE ON FUNCTION public.update_user_config_partial(jsonb, text, boolean
 
 -- ========================================================
 -- 1.1 基金守望提醒发送记录
--- 只记录某天某类报告是否已发送，不保存持仓或金额，避免重复微信提醒
+-- 记录某天某类报告是否已发送，并保存不含金额的公开信息摘要供网页展示
 -- ========================================================
 
 CREATE TABLE IF NOT EXISTS public.fund_watch_reports (
@@ -155,10 +155,15 @@ CREATE TABLE IF NOT EXISTS public.fund_watch_reports (
   user_id uuid not null,
   report_date date not null,
   report_mode text not null check (report_mode in ('preclose', 'evening')),
+  report_data jsonb null,
   sent_at timestamp with time zone not null default now(),
   CONSTRAINT fund_watch_reports_pkey PRIMARY KEY (id),
   CONSTRAINT fund_watch_reports_user_date_mode_key UNIQUE (user_id, report_date, report_mode)
 ) TABLESPACE pg_default;
+
+-- 兼容已经创建过旧版 fund_watch_reports 表的个人项目
+ALTER TABLE public.fund_watch_reports
+ADD COLUMN IF NOT EXISTS report_data jsonb null;
 
 ALTER TABLE public.fund_watch_reports ENABLE ROW LEVEL SECURITY;
 
