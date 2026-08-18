@@ -21,7 +21,7 @@ app/components/
 │   ├── Settings: SettingsModal, MarketSettingModal, MobileSettingModal, PcTableSettingModal, SortSettingModal
 │   ├── Auth: LoginModal, CloudConfigModal
 │   ├── Scan: ScanPickModal, ScanProgressModal, ScanImportConfirmModal, ScanImportProgressModal
-│   └── Misc: ConfirmModal, SuccessModal, DonateModal, FeedbackModal, WeChatModal, UpdatePromptModal, FundHistoryNetValueModal
+│   └── Misc: ConfirmModal, SuccessModal, UpdatePromptModal, FundHistoryNetValueModal
 ├── Charts (3)
 │   ├── FundIntradayChart.jsx   # Intraday valuation chart (localStorage data)
 │   ├── FundTrendChart.jsx      # Fund trend chart (pingzhongdata)
