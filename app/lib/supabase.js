@@ -34,6 +34,7 @@ const createNoopSupabase = () => ({
       data: { subscription: { unsubscribe: () => {} } }
     }),
     signInWithOtp: async () => ({ data: null, error: { message: 'Supabase not configured' } }),
+    signInWithPassword: async () => ({ data: null, error: { message: 'Supabase not configured' } }),
     signInWithOAuth: async () => ({ data: null, error: { message: 'Supabase not configured' } }),
     verifyOtp: async () => ({ data: null, error: { message: 'Supabase not configured' } }),
     signOut: async () => ({ error: null })
