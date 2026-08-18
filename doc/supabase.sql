@@ -327,3 +327,38 @@ $$;
 REVOKE ALL ON FUNCTION public.check_and_increment_ocr_usage(int) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.check_and_increment_ocr_usage(int) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.check_and_increment_ocr_usage(int) TO service_role;
+
+
+-- ========================================================
+-- 4. Data API 最小权限
+-- 创建项目时应关闭 "Automatically expose new tables"。
+-- 这里只开放基金守望实际需要的表权限；RLS 仍会继续限制到当前登录用户。
+-- ========================================================
+
+GRANT USAGE ON SCHEMA public TO authenticated, service_role;
+
+-- 未登录访问者不能直接读取任何个人基金数据或公共辅助表。
+REVOKE ALL ON TABLE public.user_configs FROM anon;
+REVOKE ALL ON TABLE public.fund_watch_reports FROM anon;
+REVOKE ALL ON TABLE public.fund_related FROM anon;
+REVOKE ALL ON TABLE public.fund_secid FROM anon;
+REVOKE ALL ON TABLE public.fund_topic FROM anon;
+REVOKE ALL ON TABLE public.ocr_daily_usage FROM anon;
+
+-- 登录用户：同步自己的配置、读取自己的报告和 OCR 用量，读取基金辅助数据。
+GRANT SELECT, INSERT, UPDATE ON TABLE public.user_configs TO authenticated;
+GRANT SELECT ON TABLE public.fund_watch_reports TO authenticated;
+GRANT SELECT ON TABLE public.fund_related TO authenticated;
+GRANT SELECT ON TABLE public.fund_secid TO authenticated;
+GRANT SELECT ON TABLE public.fund_topic TO authenticated;
+GRANT SELECT ON TABLE public.ocr_daily_usage TO authenticated;
+
+-- 自动分析脚本：读取单个用户配置，并写入/更新当天的发送记录。
+GRANT SELECT ON TABLE public.user_configs TO service_role;
+GRANT SELECT, INSERT, UPDATE ON TABLE public.fund_watch_reports TO service_role;
+
+-- 仅向真正需要新增记录的角色开放自增序列。
+REVOKE ALL ON SEQUENCE public.user_configs_id_seq FROM anon;
+REVOKE ALL ON SEQUENCE public.fund_watch_reports_id_seq FROM anon;
+GRANT USAGE, SELECT ON SEQUENCE public.user_configs_id_seq TO authenticated;
+GRANT USAGE, SELECT ON SEQUENCE public.fund_watch_reports_id_seq TO service_role;
