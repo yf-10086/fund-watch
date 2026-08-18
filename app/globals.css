@@ -747,8 +747,25 @@ body::before {
   color: var(--accent);
   font-size: 11px;
   font-weight: 700;
+  font-family: inherit;
   line-height: 1;
   white-space: nowrap;
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease,
+    transform 0.2s ease;
+}
+
+.risk-mode-badge:hover {
+  border-color: color-mix(in srgb, var(--accent) 75%, transparent);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  transform: translateY(-1px);
+}
+
+.risk-mode-badge:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .brand.search-focused-sibling {
@@ -831,6 +848,73 @@ body::before {
   min-width: 0;
   color: var(--muted);
   font-size: 11px;
+}
+
+.decision-profile__risk-mode {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(180px, 0.7fr) minmax(0, 2.3fr);
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.decision-profile__risk-mode > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.decision-profile__risk-mode > div:first-child strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.decision-profile__risk-mode > div:first-child span {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.decision-profile__risk-mode-options {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.decision-profile__risk-mode-options button {
+  display: flex;
+  min-width: 0;
+  min-height: 48px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 3px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--card-bg);
+  color: var(--text);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.decision-profile__risk-mode-options button small {
+  overflow: hidden;
+  max-width: 100%;
+  color: var(--muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.decision-profile__risk-mode-options button.is-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--card-bg));
+  color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .decision-profile input {
@@ -1174,6 +1258,18 @@ body::before {
   }
   .decision-profile {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .decision-profile__risk-mode {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+  .decision-profile__risk-mode-options {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .decision-profile__risk-mode-options button small {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
   }
   .decision-metrics {
     gap: 8px;

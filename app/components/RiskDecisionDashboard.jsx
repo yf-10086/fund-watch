@@ -2,7 +2,12 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { BellRing, Clock3, Settings2, ShieldCheck, WalletCards, X } from 'lucide-react';
-import { analyzeFundPortfolio, normalizeFundWatchProfile } from '../lib/fundDecisionEngine.mjs';
+import {
+  FUND_RISK_MODE_PRESETS,
+  analyzeFundPortfolio,
+  applyFundRiskMode,
+  normalizeFundWatchProfile
+} from '../lib/fundDecisionEngine.mjs';
 
 const money = new Intl.NumberFormat('zh-CN', {
   style: 'currency',
@@ -12,19 +17,37 @@ const money = new Intl.NumberFormat('zh-CN', {
 
 const pct = (value) => `${Number(value || 0).toFixed(1)}%`;
 
-export default function RiskDecisionDashboard({ funds, holdings, profile, onProfileChange }) {
+const RISK_SETTING_KEYS = new Set(['riskLossLimit', 'singleFundCap', 'qdiiCap']);
+
+export default function RiskDecisionDashboard({
+  funds,
+  holdings,
+  profile,
+  onProfileChange,
+  settingsOpen,
+  onSettingsOpenChange
+}) {
   const safeProfile = useMemo(() => normalizeFundWatchProfile(profile), [profile]);
   const analysis = useMemo(
     () => analyzeFundPortfolio({ funds, holdings, profile: safeProfile }),
     [funds, holdings, safeProfile]
   );
-  const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(safeProfile);
+  const editing = Boolean(settingsOpen);
 
   useEffect(() => setDraft(safeProfile), [safeProfile]);
 
   const updateDraft = (key, value) => {
-    setDraft((current) => ({ ...current, [key]: value }));
+    setDraft((current) => ({
+      ...current,
+      [key]: value,
+      ...(RISK_SETTING_KEYS.has(key) ? { riskMode: 'custom' } : {})
+    }));
+  };
+
+  const setEditing = (nextOpen) => {
+    if (!nextOpen) setDraft(safeProfile);
+    onSettingsOpenChange?.(nextOpen);
   };
 
   const saveProfile = () => {
@@ -53,7 +76,7 @@ export default function RiskDecisionDashboard({ funds, holdings, profile, onProf
         <button
           type="button"
           className="decision-dashboard__settings"
-          onClick={() => setEditing((value) => !value)}
+          onClick={() => setEditing(!editing)}
           aria-expanded={editing}
         >
           {editing ? <X size={17} /> : <Settings2 size={17} />}
@@ -63,6 +86,27 @@ export default function RiskDecisionDashboard({ funds, holdings, profile, onProf
 
       {editing && (
         <div className="decision-profile" role="group" aria-label="投资与风险设置">
+          <div className="decision-profile__risk-mode">
+            <div>
+              <strong>风险模式</strong>
+              <span>选择预设或手动修改下方警戒线；模式只是阈值设置，不代表收益承诺。</span>
+            </div>
+            <div className="decision-profile__risk-mode-options" role="radiogroup" aria-label="选择风险模式">
+              {Object.entries(FUND_RISK_MODE_PRESETS).map(([key, preset]) => (
+                <button
+                  key={key}
+                  type="button"
+                  role="radio"
+                  aria-checked={draft.riskMode === key}
+                  className={draft.riskMode === key ? 'is-active' : ''}
+                  onClick={() => setDraft((current) => applyFundRiskMode(current, key))}
+                >
+                  <strong>{preset.shortLabel}</strong>
+                  <small>{preset.description}</small>
+                </button>
+              ))}
+            </div>
+          </div>
           <label>
             <span>计划投资总额</span>
             <input

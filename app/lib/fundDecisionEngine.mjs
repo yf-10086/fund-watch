@@ -1,4 +1,5 @@
 export const DEFAULT_FUND_WATCH_PROFILE = Object.freeze({
+  riskMode: 'conservative',
   riskLossLimit: 5,
   horizonMonths: 9,
   totalInvestment: 0,
@@ -10,6 +11,38 @@ export const DEFAULT_FUND_WATCH_PROFILE = Object.freeze({
   enablePreCloseReminder: true,
   enableEveningReport: true,
   reminderChannel: 'wechat'
+});
+
+export const FUND_RISK_MODE_PRESETS = Object.freeze({
+  conservative: Object.freeze({
+    label: '保守模式',
+    shortLabel: '保守',
+    description: '5%警戒 · 单只20% · QDII 10%',
+    riskLossLimit: 5,
+    singleFundCap: 20,
+    qdiiCap: 10
+  }),
+  balanced: Object.freeze({
+    label: '稳健模式',
+    shortLabel: '稳健',
+    description: '8%警戒 · 单只25% · QDII 15%',
+    riskLossLimit: 8,
+    singleFundCap: 25,
+    qdiiCap: 15
+  }),
+  growth: Object.freeze({
+    label: '进取模式',
+    shortLabel: '进取',
+    description: '12%警戒 · 单只30% · QDII 20%',
+    riskLossLimit: 12,
+    singleFundCap: 30,
+    qdiiCap: 20
+  }),
+  custom: Object.freeze({
+    label: '自定义模式',
+    shortLabel: '自定义',
+    description: '手动设置警戒线和仓位上限'
+  })
 });
 
 const QDII_PATTERN = /QDII|全球|海外|纳斯达克|标普|恒生|日经|德国|印度|越南|美国|香港|港股/i;
@@ -50,7 +83,44 @@ export function normalizeFundWatchProfile(value) {
   next.reminderChannel = ['wechat', 'browser', 'none'].includes(next.reminderChannel)
     ? next.reminderChannel
     : DEFAULT_FUND_WATCH_PROFILE.reminderChannel;
+  const explicitRiskMode = Object.hasOwn(FUND_RISK_MODE_PRESETS, input.riskMode) ? input.riskMode : null;
+  next.riskMode = explicitRiskMode || inferFundRiskMode(next);
   return next;
+}
+
+export function inferFundRiskMode(profile) {
+  for (const [key, preset] of Object.entries(FUND_RISK_MODE_PRESETS)) {
+    if (key === 'custom') continue;
+    if (
+      Number(profile?.riskLossLimit) === preset.riskLossLimit &&
+      Number(profile?.singleFundCap) === preset.singleFundCap &&
+      Number(profile?.qdiiCap) === preset.qdiiCap
+    ) {
+      return key;
+    }
+  }
+  return 'custom';
+}
+
+export function applyFundRiskMode(profile, riskMode) {
+  const mode = Object.hasOwn(FUND_RISK_MODE_PRESETS, riskMode) ? riskMode : 'custom';
+  const preset = FUND_RISK_MODE_PRESETS[mode];
+  return {
+    ...profile,
+    riskMode: mode,
+    ...(mode === 'custom'
+      ? {}
+      : {
+          riskLossLimit: preset.riskLossLimit,
+          singleFundCap: preset.singleFundCap,
+          qdiiCap: preset.qdiiCap
+        })
+  };
+}
+
+export function getFundRiskModeLabel(profile) {
+  const mode = Object.hasOwn(FUND_RISK_MODE_PRESETS, profile?.riskMode) ? profile.riskMode : inferFundRiskMode(profile);
+  return FUND_RISK_MODE_PRESETS[mode].label;
 }
 
 export function detectFundCategory(fund) {

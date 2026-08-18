@@ -23,6 +23,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import EmptyStateCard from './components/EmptyStateCard';
 import FundCard from './components/FundCard';
 import RiskDecisionDashboard from './components/RiskDecisionDashboard';
+import { getFundRiskModeLabel, normalizeFundWatchProfile } from './lib/fundDecisionEngine.mjs';
 
 import GroupSummary from './components/GroupSummary';
 import GroupAccountSummaryCard from './components/GroupAccountSummaryCard';
@@ -2121,7 +2122,17 @@ export default function HomePage() {
     setFundTagRecords
   });
 
-  const fundWatchProfile = useMemo(() => customSettings?.fundWatchProfile || {}, [customSettings?.fundWatchProfile]);
+  const fundWatchProfile = useMemo(
+    () => normalizeFundWatchProfile(customSettings?.fundWatchProfile),
+    [customSettings?.fundWatchProfile]
+  );
+  const [fundWatchSettingsOpen, setFundWatchSettingsOpen] = useState(false);
+  const openFundWatchSettings = useCallback(() => {
+    setFundWatchSettingsOpen(true);
+    window.requestAnimationFrame(() => {
+      document.querySelector('.decision-dashboard')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }, []);
 
   const handleFundWatchProfileChange = useCallback(
     (nextProfile) => {
@@ -4581,9 +4592,15 @@ export default function HomePage() {
                 </TooltipContent>
               </Tooltip>
               <span className="brand-name">基金守望</span>
-              <span className="risk-mode-badge" title="组合最大可接受亏损警戒线为 5%">
-                保守模式 · 5%警戒线
-              </span>
+              <button
+                type="button"
+                className="risk-mode-badge"
+                title="点击设置风险模式和亏损警戒线"
+                aria-label={`当前${getFundRiskModeLabel(fundWatchProfile)}，${fundWatchProfile.riskLossLimit}%亏损警戒线，点击修改`}
+                onClick={openFundWatchSettings}
+              >
+                {getFundRiskModeLabel(fundWatchProfile)} · {fundWatchProfile.riskLossLimit}%警戒线
+              </button>
             </div>
             <div
               className={`glass add-fund-section navbar-add-fund ${isSearchFocused || selectedFunds.length > 0 ? 'search-focused' : ''}`}
@@ -5092,6 +5109,8 @@ export default function HomePage() {
                   holdings={holdingsForTabWithLinked}
                   profile={fundWatchProfile}
                   onProfileChange={handleFundWatchProfileChange}
+                  settingsOpen={fundWatchSettingsOpen}
+                  onSettingsOpenChange={setFundWatchSettingsOpen}
                 />
 
                 {scopedFunds.length === 0 && !(currentTab === SUMMARY_TAB_ID && showPortfolioSummaryTab) ? (
