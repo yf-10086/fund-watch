@@ -98,7 +98,8 @@ export default function LoginModal({
 
     try {
       setLoginLoading(true);
-      const { error } = await supabase.auth.resetPasswordForEmail(email);
+      const redirectTo = `${window.location.origin}${window.location.pathname}`;
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
       if (error) throw error;
       setLoginSuccess('重置邮件已发送。请打开邮箱中的“Reset your password”邮件，并点击重置链接。');
     } catch (err) {
