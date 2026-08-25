@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "test:ocr": "node scripts/test-local-fund-ocr.mjs",
     "analyze:daily": "node scripts/daily-analysis.mjs",
     "prepare": "husky"
   },

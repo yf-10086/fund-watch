@@ -3,6 +3,7 @@ import { useState, useRef } from 'react';
 import { toast as sonnerToast } from 'sonner';
 import { parseFundTextWithLLM, fetchFundData, searchFunds, fetchFundsBestSources } from '../api/fund';
 import { recordValuation } from '../lib/valuationTimeseries';
+import { mergeFundOcrResults, parseFundTextLocally } from '../lib/localFundOcrParser.mjs';
 import { useFundFuzzyMatcher } from './useFundFuzzyMatcher';
 import { useStorageStore, useUserStore, useModalStore } from '../stores';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
@@ -123,23 +124,31 @@ export function useScanImport({
 
       setScanProgress((prev) => ({ ...prev, current: i + 1 }));
 
-      let fundsResString;
-      try {
-        fundsResString = await parseFundTextWithLLM(text);
-      } catch (e) {
-        // 限流错误直接向上传播，中止整个扫描流程
-        if (e?.code === 'DAILY_LIMIT_EXCEEDED') throw e;
-        fundsResString = null;
-      }
       let fundsRes = null;
-      try {
-        fundsRes = JSON.parse(fundsResString);
-      } catch (e) {
-        console.error(e);
+      const localFundsRes = parseFundTextLocally(text);
+      if (localFundsRes.length === 0) {
+        let fundsResString;
+        try {
+          fundsResString = await parseFundTextWithLLM(text);
+        } catch (e) {
+          // 限流错误直接向上传播，中止整个扫描流程
+          if (e?.code === 'DAILY_LIMIT_EXCEEDED') throw e;
+          fundsResString = null;
+        }
+        try {
+          fundsRes = JSON.parse(fundsResString);
+        } catch (e) {
+          console.warn('云端 OCR 解析不可用，已保留本地识别结果。');
+        }
       }
 
-      if (isArray(fundsRes) && fundsRes.length > 0) {
-        fundsRes.forEach((fund) => {
+      const mergedFundsRes = mergeFundOcrResults(
+        isArray(fundsRes) ? fundsRes.map((fund) => ({ ...fund, source: 'cloud' })) : [],
+        localFundsRes
+      );
+
+      if (mergedFundsRes.length > 0) {
+        mergedFundsRes.forEach((fund) => {
           const code = fund.fundCode || '';
           const name = (fund.fundName || '').trim();
           if (code && !addedFundCodes.has(code)) {
