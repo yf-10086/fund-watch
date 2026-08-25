@@ -1,7 +1,7 @@
 'use client';
 
 import { AnimatePresence } from 'framer-motion';
-import { RefreshCw, FolderPlusIcon } from 'lucide-react';
+import { FolderPlusIcon } from 'lucide-react';
 import { isFunction, isPlainObject } from 'lodash';
 import { v4 as uuidv4 } from 'uuid';
 import dynamic from 'next/dynamic';
@@ -800,22 +800,20 @@ function ModalsLayerContent({ callbacksRef }) {
       {/* ===== Modal: 设备冲突 ===== */}
       <AnimatePresence>
         {deviceConflictModal.open && (
-          <ConfirmModal
-            title="其它设备登录提示"
-            onCancel={() => {
-              setDeviceConflictModal({ ...deviceConflictModal, open: false });
-              if (cb.current.skipSyncRef) cb.current.skipSyncRef.current = false;
-              if (cb.current.refreshCycleStartRef) cb.current.refreshCycleStartRef.current = Date.now();
-            }}
+          <CloudConfigModal
+            type="conflict"
             onConfirm={async () => {
+              const { userId } = deviceConflictModal;
+              setDeviceConflictModal({ ...deviceConflictModal, open: false });
+              if (cb.current.refreshCycleStartRef) cb.current.refreshCycleStartRef.current = Date.now();
+              await cb.current.syncUserConfig?.(userId, true, null, false, { forceTakeover: true });
+            }}
+            onCancel={async () => {
               const { userId } = deviceConflictModal;
               setDeviceConflictModal({ ...deviceConflictModal, open: false });
               if (cb.current.refreshCycleStartRef) cb.current.refreshCycleStartRef.current = Date.now();
               await cb.current.fetchCloudConfig?.(userId, false, { forceTakeover: true });
             }}
-            message={deviceConflictModal.message}
-            confirmText="确认接管"
-            icon={<RefreshCw width="20" height="20" className="shrink-0 text-[var(--primary)]" />}
           />
         )}
       </AnimatePresence>
