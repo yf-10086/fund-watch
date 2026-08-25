@@ -29,6 +29,7 @@ export default function DailyOnlineInsights({ reportState }) {
   const sourceDisabled = reportData?.sourceStatus === 'disabled';
   const sourceUnavailable = reportData?.sourceStatus === 'unavailable';
   const sourcePartial = reportData?.sourceStatus === 'partial';
+  const optionalSourceUnavailable = Number(reportData?.optionalFailedSourceCount) > 0;
 
   let emptyTitle = '';
   let emptyMessage = '';
@@ -80,8 +81,10 @@ export default function DailyOnlineInsights({ reportState }) {
               : sourceUnavailable
                 ? '本次信息源不可用。'
                 : sourcePartial
-                  ? '部分信息源读取失败。'
-                  : '信息源读取正常。'}
+                  ? '部分主要信息源读取失败。'
+                  : optionalSourceUnavailable
+                    ? '主要信息源正常，扩展新闻源暂不可用。'
+                    : '信息源读取正常。'}
           </div>
           {sourceDisabled ? (
             <div className="online-insights__empty is-quiet">

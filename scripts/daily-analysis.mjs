@@ -297,6 +297,7 @@ function buildReport(analysis, mode, today, nowTime, freshCount, onlineInfo) {
         : onlineInfo.sourceStatus === 'partial'
           ? '部分公开信息源读取失败'
           : '公开信息源读取正常';
+  const optionalSourceText = onlineInfo.optionalFailedSourceCount > 0 ? '；扩展新闻源暂不可用' : '';
   const summaryLines = analysis.profile.includeAmountsInNotifications
     ? [
         `- 持仓市值：${money(analysis.marketValue)}，持仓收益率：${percent(analysis.profitPct)}`,
@@ -313,7 +314,7 @@ function buildReport(analysis, mode, today, nowTime, freshCount, onlineInfo) {
     `- 分析时间：${today} ${nowTime}（北京时间）`,
     `- 数据新鲜度：${freshCount}/${analysis.fundCount}只为当日数据，结论置信度${confidence}`,
     ...summaryLines,
-    `- 公开信息：检查${onlineInfo.checkedFundCount}只持仓，收集${onlineInfo.collectedCount}条，筛出${onlineInfo.usefulCount}条有用信息（${sourceStatusText}）`,
+    `- 公开信息：检查${onlineInfo.checkedFundCount}只持仓，收集${onlineInfo.collectedCount}条，筛出${onlineInfo.usefulCount}条有用信息（${sourceStatusText}${optionalSourceText}）`,
     '',
     '## 今日参考动作',
     ''
@@ -378,6 +379,8 @@ function buildReport(analysis, mode, today, nowTime, freshCount, onlineInfo) {
       sourceStatus: onlineInfo.sourceStatus,
       successfulSourceCount: onlineInfo.successfulSourceCount,
       failedSourceCount: onlineInfo.failedSourceCount,
+      optionalSuccessfulSourceCount: onlineInfo.optionalSuccessfulSourceCount,
+      optionalFailedSourceCount: onlineInfo.optionalFailedSourceCount,
       insights: onlineInfo.items,
       decisions: decisionRows.map((item) => ({
         code: item.code,
@@ -455,6 +458,8 @@ async function main() {
     sourceStatus: profile.enableOnlineInfoAnalysis ? 'unavailable' : 'disabled',
     successfulSourceCount: 0,
     failedSourceCount: 0,
+    optionalSuccessfulSourceCount: 0,
+    optionalFailedSourceCount: 0,
     items: []
   };
   if (profile.enableOnlineInfoAnalysis) {

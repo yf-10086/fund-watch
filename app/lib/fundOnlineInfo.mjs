@@ -281,21 +281,25 @@ export function parseFundPortalNews(html, fund, referenceDate) {
   const end = source.indexOf('基金公告 start', start);
   if (start < 0) return [];
   const block = source.slice(start, end > start ? end : start + 12000);
-  return [
-    ...block.matchAll(
-      /<li><a\s+href=["']([^"']+)["'][^>]*>[\s\S]*?<span\s+class=["']newsTit["']>([\s\S]*?)<\/span>[\s\S]*?<span\s+class=["']newsData["']>([\s\S]*?)<\/span>[\s\S]*?<\/a>\s*<\/li>/gi
-    )
-  ]
-    .map((match) => ({
-      fundCode: String(fund?.code || '').trim(),
-      fundName: cleanText(fund?.name),
-      title: cleanText(match[2]),
-      publishedAt: monthDayToDate(cleanText(match[3]), referenceDate),
-      source: '天天基金资讯',
-      sourceType: 'news',
-      url: safeHttpUrl(String(match[1]).replace(/^http:/i, 'https:'))
-    }))
-    .filter((item) => recentDate(item.publishedAt, referenceDate, 1) && isRelevantTitle(item.title, fund));
+  return (
+    [
+      ...block.matchAll(
+        /<li><a\s+href=["']([^"']+)["'][^>]*>[\s\S]*?<span\s+class=["']newsTit["']>([\s\S]*?)<\/span>[\s\S]*?<span\s+class=["']newsData["']>([\s\S]*?)<\/span>[\s\S]*?<\/a>\s*<\/li>/gi
+      )
+    ]
+      .map((match) => ({
+        fundCode: String(fund?.code || '').trim(),
+        fundName: cleanText(fund?.name),
+        title: cleanText(match[2]),
+        publishedAt: monthDayToDate(cleanText(match[3]), referenceDate),
+        source: '天天基金资讯',
+        sourceType: 'news',
+        url: safeHttpUrl(String(match[1]).replace(/^http:/i, 'https:'))
+      }))
+      // “基金资讯”区块已经由天天基金按当前基金筛选。部分市场类标题不会重复
+      // 基金名称或代码，继续套用全网搜索的严格相关性规则会把有效条目全部丢掉。
+      .filter((item) => recentDate(item.publishedAt, referenceDate, 1))
+  );
 }
 
 export async function fetchFundPortalNews(fund, referenceDate, { fetchImpl = fetch } = {}) {
@@ -333,15 +337,22 @@ export async function collectFundOnlineInfo(funds, referenceDate, { fetchImpl = 
       fetchFundPortalNews(fund, referenceDate, { fetchImpl }),
       fetchFundNews(fund, { fetchImpl })
     ]);
-    const sources = [announcements, portalNews, publicNews];
+    const primarySources = [announcements, portalNews];
+    const optionalSources = [publicNews];
     return {
-      items: sources.flatMap((source) => (source.status === 'fulfilled' ? source.value : [])),
-      successfulSourceCount: sources.filter((source) => source.status === 'fulfilled').length,
-      failedSourceCount: sources.filter((source) => source.status === 'rejected').length
+      items: [...primarySources, ...optionalSources].flatMap((source) =>
+        source.status === 'fulfilled' ? source.value : []
+      ),
+      successfulSourceCount: primarySources.filter((source) => source.status === 'fulfilled').length,
+      failedSourceCount: primarySources.filter((source) => source.status === 'rejected').length,
+      optionalSuccessfulSourceCount: optionalSources.filter((source) => source.status === 'fulfilled').length,
+      optionalFailedSourceCount: optionalSources.filter((source) => source.status === 'rejected').length
     };
   });
   const successfulSourceCount = rows.reduce((total, row) => total + row.successfulSourceCount, 0);
   const failedSourceCount = rows.reduce((total, row) => total + row.failedSourceCount, 0);
+  const optionalSuccessfulSourceCount = rows.reduce((total, row) => total + row.optionalSuccessfulSourceCount, 0);
+  const optionalFailedSourceCount = rows.reduce((total, row) => total + row.optionalFailedSourceCount, 0);
   const analyzed = analyzeFundOnlineItems(rows.flatMap((row) => row.items));
   return {
     checkedFundCount: heldFunds.length,
@@ -350,6 +361,8 @@ export async function collectFundOnlineInfo(funds, referenceDate, { fetchImpl = 
     sourceStatus: successfulSourceCount === 0 ? 'unavailable' : failedSourceCount > 0 ? 'partial' : 'ok',
     successfulSourceCount,
     failedSourceCount,
+    optionalSuccessfulSourceCount,
+    optionalFailedSourceCount,
     items: analyzed.useful.slice(0, 20)
   };
 }
