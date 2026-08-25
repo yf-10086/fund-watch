@@ -399,6 +399,19 @@ export function useScanImport({
     };
 
     const rawCodes = Array.from(selectedScannedCodes);
+
+    if (rawCodes.length === 0) {
+      const hasExistingFundWithoutAmount = scannedFunds.some(
+        (item) => item.status === 'added' && parseAmount(item.holdAmounts) === null
+      );
+      if (hasExistingFundWithoutAmount) {
+        showToast('基金已添加，但未识别到持有金额。请换用包含“持有金额”的完整截图，或打开基金详情手动填写', 'info');
+      } else {
+        showToast('请先勾选需要导入的基金', 'info');
+      }
+      return;
+    }
+
     const targetExists = (code) => {
       if (!code) return false;
       if (targetGroupId === 'all') return funds.some((f) => f.code === code);
@@ -411,13 +424,12 @@ export function useScanImport({
       const exists = targetExists(c);
       const scannedFund = scannedFunds.find((f) => f.code === c);
       const holdAmounts = parseAmount(scannedFund?.holdAmounts);
-      const holdGains = parseAmount(scannedFund?.holdGains);
-      const hasHoldingData = holdAmounts !== null && holdGains !== null;
+      const hasHoldingData = holdAmounts !== null;
       return !exists || hasHoldingData;
     });
 
     if (codes.length === 0) {
-      showToast('所选基金已在目标分组中', 'info');
+      showToast('所选基金已在目标分组中，且没有新的持有金额可更新', 'info');
       return;
     }
     setScanConfirmModalOpen(false);

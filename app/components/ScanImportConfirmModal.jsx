@@ -42,6 +42,11 @@ export default function ScanImportConfirmModal({
     return num;
   };
 
+  const noSelectionReason =
+    selectedScannedCodes.size === 0 && scannedFunds.some((item) => item.status === 'added')
+      ? '识别到的基金已经添加，但本次没有识别出可更新的持有金额。点击“查看原因”可查看处理方法。'
+      : '';
+
   return (
     <motion.div
       className="modal-overlay"
@@ -123,7 +128,8 @@ export default function ScanImportConfirmModal({
                     : false;
                 const holdAmounts = formatAmount(item.holdAmounts);
                 const holdGains = formatAmount(item.holdGains);
-                const hasHoldingData = holdAmounts !== null && holdGains !== null;
+                // 只要识别到持有金额，就能根据当前净值估算份额；持有收益是可选数据。
+                const hasHoldingData = holdAmounts !== null;
                 const isAlreadyInTarget = targetGroup === 'all' ? inAll : targetGroup === 'fav' ? inFav : inGroup;
                 const isDisabled = (isAlreadyInTarget && !hasHoldingData) || isInvalid;
                 const displayName = item.name || (isInvalid ? '未找到基金' : '未知基金');
@@ -255,12 +261,17 @@ export default function ScanImportConfirmModal({
             </div>
           </>
         )}
+        {noSelectionReason && (
+          <div className="muted" style={{ marginTop: 12, fontSize: 12, lineHeight: 1.6 }}>
+            {noSelectionReason}
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
           <button className="button secondary" onClick={onClose}>
             取消
           </button>
-          <button className="button" onClick={handleConfirm} disabled={selectedScannedCodes.size === 0}>
-            确认导入
+          <button className="button" onClick={handleConfirm}>
+            {selectedScannedCodes.size === 0 ? '查看原因' : '确认导入'}
           </button>
         </div>
       </motion.div>
