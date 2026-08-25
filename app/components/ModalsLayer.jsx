@@ -77,6 +77,7 @@ function ModalsLayerContent({ callbacksRef }) {
   const settingsOpen = useModalStore((s) => s.settingsOpen);
   const loginModalOpen = useModalStore((s) => s.loginModalOpen);
   const loginInitialError = useModalStore((s) => s.loginInitialError);
+  const loginModalMode = useModalStore((s) => s.loginModalMode);
   const tutorialDrawerOpen = useModalStore((s) => s.tutorialDrawerOpen);
   const portfolioEarningsOpen = useModalStore((s) => s.portfolioEarningsOpen);
   const mobileFundDrawerOpen = useModalStore((s) => s.mobileFundDrawerOpen);
@@ -915,10 +916,12 @@ function ModalsLayerContent({ callbacksRef }) {
             onClose={() => {
               setLoginModalOpen(false);
               setLoginInitialError('');
+              useModalStore.setState({ loginModalMode: 'login' });
             }}
             showToast={cb.current.showToast}
             isExplicitLoginRef={cb.current.isExplicitLoginRef}
             initialError={loginInitialError}
+            initialMode={loginModalMode}
           />
         )}
       </AnimatePresence>

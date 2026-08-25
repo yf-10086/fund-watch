@@ -2073,7 +2073,7 @@ export default function HomePage() {
       showToast('未配置 Supabase，无法登录', 'error');
       return;
     }
-    setLoginModalOpen(true);
+    useModalStore.setState({ loginModalOpen: true, loginModalMode: 'login', loginInitialError: '' });
   };
 
   const {
@@ -2862,6 +2862,15 @@ export default function HomePage() {
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       // INITIAL_SESSION 会由 getSession() 主动触发，这里不再重复处理
       if (event === 'INITIAL_SESSION') return;
+      if (event === 'PASSWORD_RECOVERY') {
+        await handleSession(session ?? null, event, false);
+        useModalStore.setState({
+          loginModalOpen: true,
+          loginModalMode: 'update-password',
+          loginInitialError: ''
+        });
+        return;
+      }
       const isExplicitLogin = event === 'SIGNED_IN' && isExplicitLoginRef.current;
       await handleSession(session ?? null, event, isExplicitLogin);
       if (event === 'SIGNED_IN') {
