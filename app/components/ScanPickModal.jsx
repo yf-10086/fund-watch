@@ -71,7 +71,7 @@ export default function ScanPickModal({ onClose, onPick, onFilesDrop, isScanning
       className="modal-overlay"
       role="dialog"
       aria-modal="true"
-      aria-label="选择持仓截图"
+      aria-label="选择持仓或交易记录截图"
       onClick={onClose}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
@@ -86,7 +86,7 @@ export default function ScanPickModal({ onClose, onPick, onFilesDrop, isScanning
         style={{ width: 420, maxWidth: '90vw' }}
       >
         <div className="title" style={{ marginBottom: 12 }}>
-          <span>选择持仓截图</span>
+          <span>选择持仓或交易记录截图</span>
           {remaining !== null && (
             <span className={`ocr-quota-badge${isExhausted ? ' exhausted' : isWarning ? ' warning' : ''}`}>
               今日剩余识别次数 {remaining}/{max}
@@ -94,8 +94,7 @@ export default function ScanPickModal({ onClose, onPick, onFilesDrop, isScanning
           )}
         </div>
         <div className="muted" style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 12 }}>
-          从相册选择一张或多张持仓截图，系统将自动识别其中的
-          <span style={{ color: 'var(--primary)' }}>基金代码（6位数字）</span>，并支持批量导入。
+          从相册选择持仓截图或支付宝“交易记录”截图。系统可以识别基金代码，也可以识别买入、定投金额和交易时间。
         </div>
         <div
           className={`scan-pick-dropzone muted ${isDragging ? 'dragging' : ''}`}

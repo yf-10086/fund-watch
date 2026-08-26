@@ -3,7 +3,12 @@ import { useState, useRef } from 'react';
 import { toast as sonnerToast } from 'sonner';
 import { parseFundTextWithLLM, fetchFundData, searchFunds, fetchFundsBestSources } from '../api/fund';
 import { recordValuation } from '../lib/valuationTimeseries';
-import { mergeFundOcrResults, parseFundTextLocally } from '../lib/localFundOcrParser.mjs';
+import {
+  mergeFundOcrResults,
+  normalizeFundNameForMatch,
+  parseFundTextLocally,
+  parseFundTransactionTextLocally
+} from '../lib/localFundOcrParser.mjs';
 import { useFundFuzzyMatcher } from './useFundFuzzyMatcher';
 import { useStorageStore, useUserStore, useModalStore } from '../stores';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
@@ -24,7 +29,8 @@ export function useScanImport({
   showToast,
   normalizeCode,
   dedupeByCode,
-  setFundTagRecords
+  setFundTagRecords,
+  processPendingQueue
 }) {
   const setSuccessModal = (state) => useModalStore.setState({ successModal: state });
   const user = useUserStore((s) => s.user);
@@ -37,6 +43,7 @@ export function useScanImport({
   const setFavorites = useStorageStore((s) => s.setFavorites);
   const setGroups = useStorageStore((s) => s.setGroups);
   const setGroupHoldings = useStorageStore((s) => s.setGroupHoldings);
+  const setPendingTrades = useStorageStore((s) => s.setPendingTrades);
   const setCollapsedCodes = useStorageStore((s) => s.setCollapsedCodes);
   const setCollapsedTrends = useStorageStore((s) => s.setCollapsedTrends);
 
@@ -84,6 +91,37 @@ export function useScanImport({
 
   const { resolveFundCodeByFuzzy } = useFundFuzzyMatcher();
 
+  const makeTransactionKey = (trade, code = '') =>
+    `tx:${code || normalizeFundNameForMatch(trade.fundName)}:${trade.type}:${trade.amount}:${trade.date}:${trade.time}`;
+
+  const stableTransactionId = (key) => {
+    let hash = 2166136261;
+    for (let index = 0; index < key.length; index += 1) {
+      hash ^= key.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return `ocr-${(hash >>> 0).toString(16)}`;
+  };
+
+  const nameSimilarity = (left, right) => {
+    const a = normalizeFundNameForMatch(left);
+    const b = normalizeFundNameForMatch(right);
+    if (!a || !b) return 0;
+    if (a === b) return 1;
+    if (a.includes(b) || b.includes(a)) return Math.min(a.length, b.length) / Math.max(a.length, b.length);
+    const aChars = new Map();
+    for (const char of a) aChars.set(char, (aChars.get(char) || 0) + 1);
+    let common = 0;
+    for (const char of b) {
+      const remaining = aChars.get(char) || 0;
+      if (remaining > 0) {
+        common += 1;
+        aChars.set(char, remaining - 1);
+      }
+    }
+    return (2 * common) / (a.length + b.length);
+  };
+
   const handleScanClick = () => {
     if (!user?.id) {
       sonnerToast.error('该功能需登录后使用');
@@ -112,6 +150,55 @@ export function useScanImport({
         if (timer) clearTimeout(timer);
       }
     };
+
+    const transactionRows = texts.flatMap((text) => parseFundTransactionTextLocally(text));
+    if (transactionRows.length > 0) {
+      const currentFunds = useStorageStore.getState().funds || [];
+      const results = [];
+
+      for (let index = 0; index < transactionRows.length; index += 1) {
+        if (abortScanRef.current) break;
+        const trade = transactionRows[index];
+        setScanProgress({ stage: 'verify', current: index + 1, total: transactionRows.length });
+
+        let matched = currentFunds
+          .map((fund) => ({ fund, score: nameSimilarity(trade.fundName, fund?.name) }))
+          .sort((a, b) => b.score - a.score)[0];
+        if (!matched || matched.score < 0.68) {
+          try {
+            const searched = await searchFundsWithTimeout(trade.fundName, 8000);
+            const candidate = isArray(searched) ? searched[0] : null;
+            if (candidate?.CODE) {
+              matched = {
+                fund: {
+                  code: String(candidate.CODE),
+                  name: candidate.NAME || candidate.SHORTNAME || trade.fundName
+                },
+                score: 0.7
+              };
+            }
+          } catch {}
+        }
+
+        const code = matched?.score >= 0.68 ? String(matched.fund.code || '') : '';
+        const selectionKey = makeTransactionKey(trade, code);
+        results.push({
+          ...trade,
+          code,
+          name: code ? matched.fund.name || trade.fundName : trade.fundName,
+          importKind: 'transaction',
+          selectionKey,
+          status: code ? 'transaction' : 'invalid'
+        });
+      }
+
+      if (abortScanRef.current) return;
+      setScannedFunds(results);
+      setSelectedScannedCodes(new Set(results.filter((item) => item.code).map((item) => item.selectionKey)));
+      setIsOcrScan(true);
+      setScanConfirmModalOpen(true);
+      return;
+    }
 
     const allFundsData = [];
     const addedFundCodes = new Set();
@@ -397,6 +484,83 @@ export function useScanImport({
       const num = parseFloat(String(val).replace(/,/g, ''));
       return isNaN(num) ? null : num;
     };
+
+    const transactionItems = scannedFunds.filter((item) => item.importKind === 'transaction');
+    if (transactionItems.length > 0) {
+      const selectedTransactions = transactionItems.filter((item) => selectedScannedCodes.has(item.selectionKey));
+      if (selectedTransactions.length === 0) {
+        showToast('请先勾选需要导入的交易记录', 'info');
+        return;
+      }
+
+      const state = useStorageStore.getState();
+      const existingIds = new Set((state.pendingTrades || []).map((trade) => String(trade?.id || '')));
+      Object.values(state.transactions || {}).forEach((list) => {
+        (isArray(list) ? list : []).forEach((trade) => existingIds.add(String(trade?.id || '')));
+      });
+
+      const targetGroup = targetGroupId && !['all', 'fav'].includes(targetGroupId) ? targetGroupId : null;
+      const newPending = [];
+      for (const item of selectedTransactions) {
+        const id = stableTransactionId(item.selectionKey);
+        if (existingIds.has(id)) continue;
+        const hour = Number(String(item.time || '00:00').split(':')[0]);
+        newPending.push({
+          id,
+          fundCode: item.code,
+          fundName: item.name || item.fundName,
+          type: item.type,
+          share: null,
+          amount: Number(item.amount),
+          feeRate: 0,
+          feeMode: 'rate',
+          feeValue: 0,
+          date: item.date,
+          isAfter3pm: Number.isFinite(hour) && hour >= 15,
+          isDca: !!item.isDca,
+          timestamp: Date.parse(`${item.date}T${item.time || '12:00:00'}+08:00`) || Date.now(),
+          source: 'alipay-ocr',
+          sourceStatus: item.status,
+          ...(targetGroup ? { groupId: targetGroup } : {})
+        });
+        existingIds.add(id);
+      }
+
+      if (newPending.length === 0) {
+        showToast('这些交易记录已经导入过，本次没有重复添加', 'info');
+        return;
+      }
+
+      setScanConfirmModalOpen(false);
+      setPendingTrades((previous) => [...(previous || []), ...newPending]);
+      if (targetGroup) {
+        setGroupHoldings((previous) => {
+          const next = { ...(previous || {}), [targetGroup]: { ...(previous?.[targetGroup] || {}) } };
+          newPending.forEach((trade) => {
+            if (!next[targetGroup][trade.fundCode]) next[targetGroup][trade.fundCode] = { share: 0, cost: 0 };
+          });
+          return next;
+        });
+      } else {
+        setHoldings((previous) => {
+          const next = { ...(previous || {}) };
+          newPending.forEach((trade) => {
+            if (!next[trade.fundCode]) next[trade.fundCode] = { share: 0, cost: 0 };
+          });
+          return next;
+        });
+      }
+
+      showToast(`已导入 ${newPending.length} 笔交易，正在按确认净值更新本金`, 'success');
+      try {
+        await processPendingQueue?.();
+      } catch (error) {
+        console.warn('交易截图已进入待处理队列，净值确认后会继续更新：', error);
+      }
+      setScannedFunds([]);
+      setSelectedScannedCodes(new Set());
+      return;
+    }
 
     const rawCodes = Array.from(selectedScannedCodes);
 

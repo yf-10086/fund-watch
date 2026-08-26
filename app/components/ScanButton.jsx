@@ -36,7 +36,7 @@ export default function ScanButton({ onClick, disabled }) {
         </button>
       </TooltipTrigger>
       <TooltipContent>
-        <p>拍照/上传图片识别基金代码</p>
+        <p>上传持仓或交易截图，自动更新基金与本金</p>
       </TooltipContent>
     </Tooltip>
   );

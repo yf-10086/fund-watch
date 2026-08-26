@@ -30,6 +30,7 @@ export default function ScanImportConfirmModal({
   const [autoImportTags, setAutoImportTags] = useState(true);
   const allCodeSet = useMemo(() => new Set((existingAllCodes || []).filter(Boolean)), [existingAllCodes]);
   const favCodeSet = useMemo(() => new Set((existingFavCodes || []).filter(Boolean)), [existingFavCodes]);
+  const isTransactionImport = scannedFunds.some((item) => item.importKind === 'transaction');
 
   const handleConfirm = () => {
     onConfirm(selectedGroupId, expandAfterAdd, autoDataSource, autoImportTags);
@@ -43,8 +44,12 @@ export default function ScanImportConfirmModal({
   };
 
   const noSelectionReason =
-    selectedScannedCodes.size === 0 && scannedFunds.some((item) => item.status === 'added')
-      ? '识别到的基金已经添加，但本次没有识别出可更新的持有金额。点击“查看原因”可查看处理方法。'
+    selectedScannedCodes.size === 0
+      ? isTransactionImport
+        ? '没有勾选可导入的交易记录，或者基金名称未能和现有持仓匹配。'
+        : scannedFunds.some((item) => item.status === 'added')
+          ? '识别到的基金已经添加，但本次没有识别出可更新的持有金额。点击“查看原因”可查看处理方法。'
+          : ''
       : '';
 
   return (
@@ -52,7 +57,7 @@ export default function ScanImportConfirmModal({
       className="modal-overlay"
       role="dialog"
       aria-modal="true"
-      aria-label="确认导入基金"
+      aria-label={isTransactionImport ? '确认导入交易记录' : '确认导入基金'}
       onClick={onClose}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
@@ -71,7 +76,7 @@ export default function ScanImportConfirmModal({
           style={{ marginBottom: 12, justifyContent: 'space-between', display: 'flex', alignItems: 'center' }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span>确认导入基金</span>
+            <span>{isTransactionImport ? '确认导入交易记录' : '确认导入基金'}</span>
             {isOcrScan && (
               <button
                 onClick={onRetryOcr}
@@ -98,7 +103,11 @@ export default function ScanImportConfirmModal({
         </div>
         {isOcrScan && (
           <div className="ocr-warning" style={{ marginBottom: 12 }}>
-            <span>拍照识别方案目前还在优化，请确认识别结果是否正确。</span>
+            <span>
+              {isTransactionImport
+                ? '请核对基金、金额和时间。确认后将按交易日净值更新份额、平均成本和本金。'
+                : '拍照识别方案目前还在优化，请确认识别结果是否正确。'}
+            </span>
           </div>
         )}
         {scannedFunds.length === 0 ? (
@@ -113,8 +122,52 @@ export default function ScanImportConfirmModal({
               style={{ maxHeight: 360, overflowY: 'auto' }}
             >
               {scannedFunds.map((item) => {
-                const isSelected = selectedScannedCodes.has(item.code);
+                const itemKey = item.selectionKey || item.code;
+                const isSelected = selectedScannedCodes.has(itemKey);
                 const isInvalid = item.status === 'invalid';
+                if (item.importKind === 'transaction') {
+                  return (
+                    <div
+                      key={itemKey}
+                      className={`search-item ${isSelected ? 'selected' : ''}`}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => {
+                        if (isInvalid) return;
+                        onToggle(itemKey);
+                      }}
+                      style={{
+                        cursor: isInvalid ? 'not-allowed' : 'pointer',
+                        flexDirection: 'column',
+                        alignItems: 'stretch'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                        <div className="fund-info" style={{ minWidth: 0 }}>
+                          <span className="fund-name">{item.name || item.fundName}</span>
+                          <span className="fund-code muted">{item.code ? `#${item.code}` : '未匹配到现有基金'}</span>
+                        </div>
+                        {isInvalid ? (
+                          <span className="added-label">需手动匹配</span>
+                        ) : (
+                          <div className="checkbox">{isSelected && <div className="checked-mark" />}</div>
+                        )}
+                      </div>
+                      <div
+                        className="muted"
+                        style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', marginTop: 8, fontSize: 12 }}
+                      >
+                        <span style={{ color: item.type === 'sell' ? 'var(--success)' : 'var(--danger)' }}>
+                          {item.action}
+                        </span>
+                        <span style={{ color: 'var(--text)', fontWeight: 600 }}>{formatMoney(item.amount)}</span>
+                        <span>
+                          {item.date} {item.time}
+                        </span>
+                        <span>{item.status}</span>
+                      </div>
+                    </div>
+                  );
+                }
                 const targetGroup = selectedGroupId;
                 const inAll = allCodeSet.has(item.code);
                 const inFav = favCodeSet.has(item.code);
@@ -140,7 +193,7 @@ export default function ScanImportConfirmModal({
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => {
                       if (isDisabled) return;
-                      onToggle(item.code);
+                      onToggle(itemKey);
                     }}
                     style={{
                       cursor: isDisabled ? 'not-allowed' : 'pointer',
@@ -198,47 +251,62 @@ export default function ScanImportConfirmModal({
                 );
               })}
             </div>
-            <div
-              style={{ marginTop: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}
-            >
-              <span className="muted" style={{ fontSize: 13 }}>
-                添加后展开详情
-              </span>
-              <Switch checked={expandAfterAdd} onCheckedChange={(checked) => setExpandAfterAdd(!!checked)} />
-            </div>
-            {user && (
-              <div
-                style={{
-                  marginTop: 12,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 8
-                }}
-              >
-                <span className="muted" style={{ fontSize: 13 }}>
-                  自动数据源
-                </span>
-                <Switch checked={autoDataSource} onCheckedChange={(checked) => setAutoDataSource(!!checked)} />
+            {!isTransactionImport && (
+              <>
+                <div
+                  style={{
+                    marginTop: 12,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 8
+                  }}
+                >
+                  <span className="muted" style={{ fontSize: 13 }}>
+                    添加后展开详情
+                  </span>
+                  <Switch checked={expandAfterAdd} onCheckedChange={(checked) => setExpandAfterAdd(!!checked)} />
+                </div>
+                {user && (
+                  <div
+                    style={{
+                      marginTop: 12,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 8
+                    }}
+                  >
+                    <span className="muted" style={{ fontSize: 13 }}>
+                      自动数据源
+                    </span>
+                    <Switch checked={autoDataSource} onCheckedChange={(checked) => setAutoDataSource(!!checked)} />
+                  </div>
+                )}
+                <div
+                  style={{
+                    marginTop: 12,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 8
+                  }}
+                >
+                  <span className="muted" style={{ fontSize: 13 }}>
+                    导入基金标签
+                  </span>
+                  <Switch checked={autoImportTags} onCheckedChange={(checked) => setAutoImportTags(!!checked)} />
+                </div>
+              </>
+            )}
+            {isTransactionImport && (
+              <div className="muted" style={{ marginTop: 12, fontSize: 12, lineHeight: 1.6 }}>
+                “交易进行中”的记录会先进入待处理队列；确认净值后自动换算份额并更新本金。重复截图不会重复记账。
               </div>
             )}
-            <div
-              style={{
-                marginTop: 12,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 8
-              }}
-            >
-              <span className="muted" style={{ fontSize: 13 }}>
-                导入基金标签
-              </span>
-              <Switch checked={autoImportTags} onCheckedChange={(checked) => setAutoImportTags(!!checked)} />
-            </div>
             <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
               <span className="muted" style={{ fontSize: 13, whiteSpace: 'nowrap' }}>
-                添加到分组：
+                {isTransactionImport ? '记录到分组：' : '添加到分组：'}
               </span>
               <Select value={selectedGroupId} onValueChange={(value) => setSelectedGroupId(value)}>
                 <SelectTrigger className="flex-1">
@@ -271,7 +339,7 @@ export default function ScanImportConfirmModal({
             取消
           </button>
           <button className="button" onClick={handleConfirm}>
-            {selectedScannedCodes.size === 0 ? '查看原因' : '确认导入'}
+            {selectedScannedCodes.size === 0 ? '查看原因' : isTransactionImport ? '确认并更新本金' : '确认导入'}
           </button>
         </div>
       </motion.div>

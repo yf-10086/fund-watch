@@ -2102,7 +2102,8 @@ export default function HomePage() {
     showToast,
     normalizeCode,
     dedupeByCode,
-    setFundTagRecords
+    setFundTagRecords,
+    processPendingQueue
   });
 
   const refreshAllRef = useRef(null);

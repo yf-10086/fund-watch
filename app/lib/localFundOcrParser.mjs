@@ -64,6 +64,91 @@ const normalizeFundName = (value) =>
     .replace(/[·•]/g, '')
     .replace(/[^\u4e00-\u9fa5A-Z0-9()]/g, '');
 
+export const normalizeFundNameForMatch = normalizeFundName;
+
+const normalizeTransactionDate = (value) => {
+  const match = String(value || '').match(/(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})/);
+  if (!match) return '';
+  return `${match[1]}-${String(match[2]).padStart(2, '0')}-${String(match[3]).padStart(2, '0')}`;
+};
+
+const cleanTransactionFundName = (value) =>
+  normalizeLine(value)
+    .replace(/^(?:买入|定投|卖出|赎回)\s*/i, '')
+    .replace(/^基金\s*[|｜丨:]?\s*/i, '')
+    .replace(/\s*[￥¥]?\s*\d[\d,.]*\s*元.*$/i, '')
+    .replace(/\s*20\d{2}[-/.年]\d{1,2}[-/.月]\d{1,2}.*$/i, '')
+    .replace(/\s*(?:交易进行中|处理中|待确认|交易成功|买入成功|定投成功|已确认).*$/i, '')
+    .replace(/[|｜丨]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([A-C])$/i, '$1')
+    .trim();
+
+const parseTransactionBlock = (block) => {
+  const joined = block.map(normalizeLine).filter(Boolean).join(' ');
+  const actionMatch = joined.match(/(?:^|\s)(买入|定投|卖出|赎回)(?=\s|基金|[\u4e00-\u9fa5])/);
+  if (!actionMatch) return null;
+
+  const dateTimeMatch = joined.match(/(20\d{2}[-/.年]\d{1,2}[-/.月]\d{1,2})(?:日)?\s+(\d{1,2}:\d{2}(?::\d{2})?)/);
+  const amountMatches = [...joined.matchAll(/([0-9Oo][0-9Oo,]*(?:\.[0-9Oo]{1,2})?)\s*元/g)];
+  const amountToken = amountMatches.at(-1)?.[1] || '';
+  const amount = Number(amountToken.replace(/[Oo]/g, '0').replace(/,/g, ''));
+
+  const actionIndex = actionMatch.index + actionMatch[0].lastIndexOf(actionMatch[1]);
+  let nameEnd = joined.length;
+  const boundaries = [
+    amountMatches[0]?.index,
+    dateTimeMatch?.index,
+    joined.search(/交易进行中|处理中|待确认|交易成功|买入成功|定投成功|已确认/)
+  ].filter((index) => Number.isFinite(index) && index >= actionIndex);
+  if (boundaries.length > 0) nameEnd = Math.min(...boundaries);
+  const fundName = cleanTransactionFundName(joined.slice(actionIndex, nameEnd));
+
+  if (!fundName || !Number.isFinite(amount) || amount <= 0 || !dateTimeMatch) return null;
+
+  const rawStatus = (joined.match(/交易进行中|处理中|待确认|交易成功|买入成功|定投成功|已确认/) || [])[0] || '';
+  const action = actionMatch[1];
+  return {
+    fundName,
+    action,
+    type: action === '卖出' || action === '赎回' ? 'sell' : 'buy',
+    isDca: action === '定投',
+    amount,
+    date: normalizeTransactionDate(dateTimeMatch[1]),
+    time: dateTimeMatch[2].length === 5 ? `${dateTimeMatch[2]}:00` : dateTimeMatch[2],
+    status: rawStatus || '待确认',
+    pending: !/成功|已确认/.test(rawStatus),
+    source: 'local-transaction'
+  };
+};
+
+/**
+ * 解析支付宝“交易记录”截图 OCR 文本。
+ * 仅接受同时包含交易动作、金额和完整日期时间的记录，避免把持仓页金额误当成买入。
+ */
+export const parseFundTransactionTextLocally = (text) => {
+  const lines = String(text || '')
+    .split(/\r?\n/)
+    .map(normalizeLine)
+    .filter(Boolean);
+  if (lines.length === 0) return [];
+
+  const blocks = [];
+  let current = null;
+  for (const line of lines) {
+    const isStart = /(?:^|\s)(?:买入|定投|卖出|赎回)(?=\s|基金|[\u4e00-\u9fa5])/.test(line);
+    if (isStart) {
+      if (current?.length) blocks.push(current);
+      current = [line];
+    } else if (current) {
+      current.push(line);
+    }
+  }
+  if (current?.length) blocks.push(current);
+
+  return blocks.map(parseTransactionBlock).filter(Boolean);
+};
+
 const parseMoneyToken = (value) => {
   const normalized = String(value || '')
     .replace(/[￥¥元人民币]/g, '')
