@@ -324,3 +324,119 @@ export function analyzeFundPortfolio({ funds, holdings, profile, trends = {} }) 
     fundCount: rows.length
   };
 }
+
+const INVESTMENT_TRANCHE_RULES = Object.freeze({
+  conservative: Object.freeze({ availableRatio: 0.25, monthlyRatio: 0.5 }),
+  balanced: Object.freeze({ availableRatio: 0.35, monthlyRatio: 0.75 }),
+  growth: Object.freeze({ availableRatio: 0.5, monthlyRatio: 1 }),
+  custom: Object.freeze({ availableRatio: 0.3, monthlyRatio: 0.6 })
+});
+
+function roundDownInvestmentAmount(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount < 10) return 0;
+  return Math.floor(amount / 10) * 10;
+}
+
+export function buildFundInvestmentAmountAdvice({ analysis, decisions }) {
+  const profile = normalizeFundWatchProfile(analysis?.profile);
+  const totalInvestment = Math.max(0, profile.totalInvestment);
+  const cashReserve = Math.min(totalInvestment, Math.max(0, profile.minCashReserve));
+  const investableTarget = Math.max(0, totalInvestment - cashReserve);
+  const marketValue = Math.max(0, finiteNumber(analysis?.marketValue, 0) || 0);
+  const availableBudget = Math.max(
+    0,
+    Math.min(finiteNumber(analysis?.availableBudget, 0) || 0, investableTarget - marketValue)
+  );
+
+  if (totalInvestment <= 0) {
+    return {
+      status: 'unconfigured',
+      totalInvestment,
+      cashReserve,
+      investableTarget,
+      marketValue,
+      availableBudget: 0,
+      suggestedAmount: 0,
+      items: [],
+      reason: '尚未设置计划投资总额，无法计算建议金额'
+    };
+  }
+
+  if (availableBudget < 10) {
+    return {
+      status: 'no-budget',
+      totalInvestment,
+      cashReserve,
+      investableTarget,
+      marketValue,
+      availableBudget,
+      suggestedAmount: 0,
+      items: [],
+      reason: '可用计划资金不足10元，本次不建议继续加仓'
+    };
+  }
+
+  const rows = Array.isArray(decisions) ? decisions : Array.isArray(analysis?.decisions) ? analysis.decisions : [];
+  const candidates = rows.filter((item) => {
+    const action = item?.finalAction || item?.action || '';
+    return item?.hasHolding && action === '观察分批买入';
+  });
+
+  if (candidates.length === 0) {
+    return {
+      status: 'wait',
+      totalInvestment,
+      cashReserve,
+      investableTarget,
+      marketValue,
+      availableBudget,
+      suggestedAmount: 0,
+      items: [],
+      reason: '当前没有同时满足趋势、风险和仓位条件的加仓候选，本次建议继续观察'
+    };
+  }
+
+  const rule = INVESTMENT_TRANCHE_RULES[profile.riskMode] || INVESTMENT_TRANCHE_RULES.custom;
+  const periods = Math.min(12, Math.max(3, profile.horizonMonths));
+  let remainingPool = roundDownInvestmentAmount(
+    Math.min(availableBudget * rule.availableRatio, (investableTarget / periods) * rule.monthlyRatio)
+  );
+  const items = [];
+
+  candidates.forEach((item, index) => {
+    if (remainingPool < 10) return;
+    const positionCap = Math.max(0, finiteNumber(item?.positionCap, profile.singleFundCap) || 0);
+    const fundMarketValue = Math.max(0, finiteNumber(item?.marketValue, 0) || 0);
+    const capRoom = Math.max(0, investableTarget * (positionCap / 100) - fundMarketValue);
+    const remainingCandidates = Math.max(1, candidates.length - index);
+    const suggestedAmount = roundDownInvestmentAmount(Math.min(capRoom, remainingPool / remainingCandidates));
+    if (suggestedAmount <= 0) return;
+    items.push({
+      code: item.code,
+      name: item.name,
+      category: item.category,
+      action: item.finalAction || item.action,
+      suggestedAmount,
+      positionCap,
+      reason: item.reasons?.[0] || '满足当前分批买入条件'
+    });
+    remainingPool -= suggestedAmount;
+  });
+
+  const suggestedAmount = items.reduce((sum, item) => sum + item.suggestedAmount, 0);
+  return {
+    status: suggestedAmount > 0 ? 'buy' : 'wait',
+    totalInvestment,
+    cashReserve,
+    investableTarget,
+    marketValue,
+    availableBudget,
+    suggestedAmount,
+    items,
+    reason:
+      suggestedAmount > 0
+        ? '建议金额已同时受可用资金、投资期限、风险模式和单只基金仓位上限约束'
+        : '候选基金已接近仓位上限，本次建议继续观察'
+  };
+}

@@ -238,7 +238,7 @@ export default function RiskDecisionDashboard({
             />
           </label>
           <label className="decision-profile__toggle">
-            <span>微信通知显示金额</span>
+            <span>微信通知显示金额及建议金额</span>
             <input
               type="checkbox"
               checked={draft.includeAmountsInNotifications}

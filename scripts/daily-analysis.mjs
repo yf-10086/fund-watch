@@ -1,4 +1,8 @@
-import { analyzeFundPortfolio, normalizeFundWatchProfile } from '../app/lib/fundDecisionEngine.mjs';
+import {
+  analyzeFundPortfolio,
+  buildFundInvestmentAmountAdvice,
+  normalizeFundWatchProfile
+} from '../app/lib/fundDecisionEngine.mjs';
 import { collectFundOnlineInfo, onlineInfoImpactForFund } from '../app/lib/fundOnlineInfo.mjs';
 
 const REQUIRED_ENV = ['SUPABASE_URL', 'FUND_WATCH_USER_ID', 'SERVERCHAN_SENDKEY'];
@@ -289,6 +293,7 @@ function buildReport(analysis, mode, today, nowTime, freshCount, onlineInfo) {
       onlineImpact
     };
   });
+  const amountAdvice = buildFundInvestmentAmountAdvice({ analysis, decisions: decisionRows });
   const sourceStatusText =
     onlineInfo.sourceStatus === 'disabled'
       ? '已按个人设置关闭'
@@ -316,9 +321,33 @@ function buildReport(analysis, mode, today, nowTime, freshCount, onlineInfo) {
     ...summaryLines,
     `- 公开信息：检查${onlineInfo.checkedFundCount}只持仓，收集${onlineInfo.collectedCount}条，筛出${onlineInfo.usefulCount}条有用信息（${sourceStatusText}${optionalSourceText}）`,
     '',
-    '## 今日参考动作',
+    '## 按计划金额计算的投资建议',
     ''
   ];
+
+  if (amountAdvice.status === 'unconfigured') {
+    lines.push('尚未设置计划投资总额。请在基金守望 → 今日决策台 → 投资设置中填写后再计算建议金额。');
+  } else if (!analysis.profile.includeAmountsInNotifications) {
+    lines.push(`- 本次参考动作：${amountAdvice.status === 'buy' ? '存在分批买入候选' : '暂不加仓，继续观察'}`);
+    lines.push('- 具体建议金额已按隐私设置隐藏；如需显示，请开启“微信通知显示金额及建议金额”。');
+  } else {
+    lines.push(`- 计划投资总额：${money(amountAdvice.totalInvestment)}`);
+    lines.push(`- 保留现金：${money(amountAdvice.cashReserve)}`);
+    lines.push(`- 当前持仓市值：${money(amountAdvice.marketValue)}`);
+    lines.push(`- 可用计划资金：${money(amountAdvice.availableBudget)}`);
+    lines.push(`- **本次建议投入上限：${money(amountAdvice.suggestedAmount)}**`);
+    if (amountAdvice.items.length === 0) {
+      lines.push(`- 处理建议：${amountAdvice.reason}`);
+    } else {
+      amountAdvice.items.forEach((item) => {
+        lines.push(`- ${item.name}（${item.code}）：建议不超过 **${money(item.suggestedAmount)}**`);
+      });
+      lines.push(`- 计算说明：${amountAdvice.reason}`);
+    }
+  }
+  lines.push('- 金额是本次操作上限，不是必须投入金额；不会自动买入，操作前仍需在支付宝核对。');
+  lines.push('');
+  lines.push('## 今日参考动作', '');
 
   if (rows.length === 0) {
     lines.push('尚未读到有效持仓。请先在基金守望中录入份额和成本，并完成一次云同步。');
@@ -389,7 +418,14 @@ function buildReport(analysis, mode, today, nowTime, freshCount, onlineInfo) {
         finalAction: item.finalAction,
         onlineLevel: item.onlineImpact?.level || null,
         onlineReason: item.onlineImpact?.reason || null
-      }))
+      })),
+      amountAdvice: analysis.profile.includeAmountsInNotifications
+        ? amountAdvice
+        : {
+            status: amountAdvice.status,
+            reason: amountAdvice.reason,
+            items: amountAdvice.items.map((item) => ({ code: item.code, name: item.name, action: item.action }))
+          }
     }
   };
 }
