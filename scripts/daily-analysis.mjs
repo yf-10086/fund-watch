@@ -516,8 +516,14 @@ async function main() {
   }
   const report = buildReport(analysis, REPORT_MODE, now.date, now.time, freshCount, onlineInfo);
   await sendServerChan(report.title, report.markdown);
-  await recordReportSent(now.date, REPORT_MODE, report.data);
-  console.log(`基金守望${REPORT_MODE === 'preclose' ? '交易窗口提醒' : '晚间日报'}已发送；未在日志输出持仓明细。`);
+  if (!FORCE_SEND) {
+    await recordReportSent(now.date, REPORT_MODE, report.data);
+  }
+  console.log(
+    `基金守望${REPORT_MODE === 'preclose' ? '交易窗口提醒' : '晚间日报'}已发送${
+      FORCE_SEND ? '（手动测试不占用当天正式提醒）' : ''
+    }；未在日志输出持仓明细。`
+  );
 }
 
 main().catch((error) => {

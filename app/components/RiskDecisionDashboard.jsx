@@ -303,7 +303,11 @@ export default function RiskDecisionDashboard({
                 :00生成晚间日报
               </span>
             </div>
-            <span className="decision-reminder__status">微信优先 · 待连接</span>
+            <span className="decision-reminder__status">
+              {analysis.profile.enablePreCloseReminder || analysis.profile.enableEveningReport
+                ? '微信优先 · 提醒计划已开启'
+                : '微信提醒未开启'}
+            </span>
           </div>
         </div>
 
