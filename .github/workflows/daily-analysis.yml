@@ -34,7 +34,8 @@ jobs:
     timeout-minutes: 10
     env:
       REPORT_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.report_mode || (github.event.schedule == '17,47 10-15 * * *' && 'evening' || 'preclose') }}
-      FORCE_SEND: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
+      # 手动运行及“Re-run all jobs”都只用于测试/补发，不占用当天正式提醒名额。
+      FORCE_SEND: ${{ (github.event_name == 'workflow_dispatch' || github.run_attempt > 1) && 'true' || 'false' }}
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
       FUND_WATCH_USER_ID: ${{ secrets.FUND_WATCH_USER_ID }}

@@ -87,12 +87,23 @@ async function loadUserPayload() {
   return rows[0].data;
 }
 
-async function hasReportBeenSent(reportDate, reportMode) {
+function isFormalReportRecord(row, reportDate, reportMode, profile) {
+  const sentAt = new Date(row?.sent_at);
+  if (Number.isNaN(sentAt.getTime())) return true;
+  const sent = dateParts(sentAt);
+  if (sent.date !== reportDate) return false;
+  if (reportMode === 'evening') return sent.hour >= profile.eveningReportHour;
+  const sentMinutes = sent.hour * 60 + sent.minute;
+  const cutoffMinutes = 15 * 60;
+  return sentMinutes >= cutoffMinutes - profile.reminderLeadMinutes && sentMinutes <= cutoffMinutes;
+}
+
+async function hasReportBeenSent(reportDate, reportMode, profile) {
   const supabaseUrl = process.env.SUPABASE_URL.replace(/\/$/, '');
   const userId = encodeURIComponent(process.env.FUND_WATCH_USER_ID.trim());
   const url =
-    `${supabaseUrl}/rest/v1/fund_watch_reports?select=id&user_id=eq.${userId}` +
-    `&report_date=eq.${encodeURIComponent(reportDate)}&report_mode=eq.${encodeURIComponent(reportMode)}&limit=1`;
+    `${supabaseUrl}/rest/v1/fund_watch_reports?select=sent_at&user_id=eq.${userId}` +
+    `&report_date=eq.${encodeURIComponent(reportDate)}&report_mode=eq.${encodeURIComponent(reportMode)}`;
   const rows = await fetchJson(
     url,
     {
@@ -100,7 +111,12 @@ async function hasReportBeenSent(reportDate, reportMode) {
     },
     '提醒发送记录'
   );
-  return Array.isArray(rows) && rows.length > 0;
+  if (!Array.isArray(rows) || rows.length === 0) return false;
+  const hasFormalRecord = rows.some((row) => isFormalReportRecord(row, reportDate, reportMode, profile));
+  if (!hasFormalRecord) {
+    console.warn('发现早于正式提醒窗口的测试记录，已忽略，不占用当天正式提醒名额。');
+  }
+  return hasFormalRecord;
 }
 
 async function recordReportSent(reportDate, reportMode, reportData) {
@@ -460,7 +476,7 @@ async function main() {
     console.log('尚未到个人设置的提醒时间，本轮检查结束。');
     return;
   }
-  if (!FORCE_SEND && (await hasReportBeenSent(now.date, REPORT_MODE))) {
+  if (!FORCE_SEND && (await hasReportBeenSent(now.date, REPORT_MODE, profile))) {
     console.log('今天同类提醒已经发送，本轮不重复推送。');
     return;
   }
