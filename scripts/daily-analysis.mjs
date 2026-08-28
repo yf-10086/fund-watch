@@ -4,11 +4,14 @@ import {
   normalizeFundWatchProfile
 } from '../app/lib/fundDecisionEngine.mjs';
 import { collectFundOnlineInfo, onlineInfoImpactForFund } from '../app/lib/fundOnlineInfo.mjs';
+import { isFormalReportSentAt, parseGithubSchedule, resolveReportTiming } from '../app/lib/fundReportSchedule.mjs';
 
 const REQUIRED_ENV = ['SUPABASE_URL', 'FUND_WATCH_USER_ID', 'SERVERCHAN_SENDKEY'];
 const VALUATION_FIELDS = 'FCODE,SHORTNAME,GSZZL,GZTIME,GSZ,NAV,PDATE';
 const REPORT_MODE = process.env.REPORT_MODE === 'preclose' ? 'preclose' : 'evening';
 const FORCE_SEND = process.env.FORCE_SEND === 'true';
+const IS_SCHEDULED_TRIGGER = process.env.GITHUB_EVENT_NAME === 'schedule';
+const SCHEDULED_TIME = parseGithubSchedule(process.env.SCHEDULE_EXPRESSION);
 const TIME_ZONE = 'Asia/Shanghai';
 
 function requireEnvironment() {
@@ -88,14 +91,13 @@ async function loadUserPayload() {
 }
 
 function isFormalReportRecord(row, reportDate, reportMode, profile) {
-  const sentAt = new Date(row?.sent_at);
-  if (Number.isNaN(sentAt.getTime())) return true;
-  const sent = dateParts(sentAt);
-  if (sent.date !== reportDate) return false;
-  if (reportMode === 'evening') return sent.hour >= profile.eveningReportHour;
-  const sentMinutes = sent.hour * 60 + sent.minute;
-  const cutoffMinutes = 15 * 60;
-  return sentMinutes >= cutoffMinutes - profile.reminderLeadMinutes && sentMinutes <= cutoffMinutes;
+  return isFormalReportSentAt({
+    sentAt: row?.sent_at,
+    reportDate,
+    mode: reportMode,
+    eveningReportHour: profile.eveningReportHour,
+    reminderLeadMinutes: profile.reminderLeadMinutes
+  });
 }
 
 async function hasReportBeenSent(reportDate, reportMode, profile) {
@@ -139,13 +141,6 @@ async function recordReportSent(reportDate, reportMode, reportData) {
     }
   );
   if (!response.ok) throw new Error(`写入提醒发送记录失败 HTTP ${response.status}`);
-}
-
-function isReportDue(profile, mode, now) {
-  if (FORCE_SEND) return true;
-  if (mode === 'evening') return now.hour >= profile.eveningReportHour;
-  const minutesUntilCutoff = 15 * 60 - (now.hour * 60 + now.minute);
-  return minutesUntilCutoff >= 0 && minutesUntilCutoff <= profile.reminderLeadMinutes;
 }
 
 function mergeHoldings(payload) {
@@ -472,11 +467,23 @@ async function main() {
   }
 
   const now = dateParts();
-  if (!isReportDue(profile, REPORT_MODE, now)) {
+  const timing = resolveReportTiming({
+    forceSend: FORCE_SEND,
+    isScheduledTrigger: IS_SCHEDULED_TRIGGER,
+    mode: REPORT_MODE,
+    now,
+    eveningReportHour: profile.eveningReportHour,
+    reminderLeadMinutes: profile.reminderLeadMinutes,
+    scheduledTime: SCHEDULED_TIME
+  });
+  if (!timing.due) {
     console.log('尚未到个人设置的提醒时间，本轮检查结束。');
     return;
   }
-  if (!FORCE_SEND && (await hasReportBeenSent(now.date, REPORT_MODE, profile))) {
+  if (timing.isCatchUp) {
+    console.warn(`GitHub 定时任务跨日延迟，正在补发 ${timing.reportDate} 的晚间日报。`);
+  }
+  if (!FORCE_SEND && (await hasReportBeenSent(timing.reportDate, REPORT_MODE, profile))) {
     console.log('今天同类提醒已经发送，本轮不重复推送。');
     return;
   }
@@ -530,10 +537,10 @@ async function main() {
     console.log('未检测到当日估值，按非交易日或数据未更新处理，跳过交易窗口提醒。');
     return;
   }
-  const report = buildReport(analysis, REPORT_MODE, now.date, now.time, freshCount, onlineInfo);
+  const report = buildReport(analysis, REPORT_MODE, timing.reportDate, now.time, freshCount, onlineInfo);
   await sendServerChan(report.title, report.markdown);
   if (!FORCE_SEND) {
-    await recordReportSent(now.date, REPORT_MODE, report.data);
+    await recordReportSent(timing.reportDate, REPORT_MODE, report.data);
   }
   console.log(
     `基金守望${REPORT_MODE === 'preclose' ? '交易窗口提醒' : '晚间日报'}已发送${

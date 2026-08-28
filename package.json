@@ -11,6 +11,7 @@
     "test:ocr": "node scripts/test-local-fund-ocr.mjs",
     "test:online-info": "node scripts/test-fund-online-info.mjs",
     "test:investment-advice": "node scripts/test-fund-investment-advice.mjs",
+    "test:report-schedule": "node scripts/test-report-schedule.mjs",
     "analyze:daily": "node scripts/daily-analysis.mjs",
     "prepare": "husky"
   },

@@ -8,8 +8,19 @@ on:
     - cron: '7,22,37,52 4-5 * * 1-5'
     - cron: '7,22,37 6 * * 1-5'
     - cron: '40 6 * * 1-5'
-    # 北京时间18:17-23:47每天每半小时检查；周末也会筛选公告和新闻，按设置的晚报小时只推送一次。
-    - cron: '17,47 10-15 * * *'
+    # 北京时间18:17-23:47每天每半小时检查。拆成单独时刻，以便 GitHub 延迟到次日时仍能识别并补发正确日期。
+    - cron: '17 10 * * *'
+    - cron: '47 10 * * *'
+    - cron: '17 11 * * *'
+    - cron: '47 11 * * *'
+    - cron: '17 12 * * *'
+    - cron: '47 12 * * *'
+    - cron: '17 13 * * *'
+    - cron: '47 13 * * *'
+    - cron: '17 14 * * *'
+    - cron: '47 14 * * *'
+    - cron: '17 15 * * *'
+    - cron: '47 15 * * *'
   workflow_dispatch:
     inputs:
       report_mode:
@@ -20,6 +31,11 @@ on:
         options:
           - preclose
           - evening
+      formal_run:
+        description: 正式补发（外部定时器专用；人工测试请保持关闭）
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -33,9 +49,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      REPORT_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.report_mode || (github.event.schedule == '17,47 10-15 * * *' && 'evening' || 'preclose') }}
+      REPORT_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.report_mode || ((contains(github.event.schedule, ' 10 ') || contains(github.event.schedule, ' 11 ') || contains(github.event.schedule, ' 12 ') || contains(github.event.schedule, ' 13 ') || contains(github.event.schedule, ' 14 ') || contains(github.event.schedule, ' 15 ')) && 'evening' || 'preclose') }}
+      SCHEDULE_EXPRESSION: ${{ github.event.schedule }}
       # 手动运行及“Re-run all jobs”都只用于测试/补发，不占用当天正式提醒名额。
-      FORCE_SEND: ${{ (github.event_name == 'workflow_dispatch' || github.run_attempt > 1) && 'true' || 'false' }}
+      FORCE_SEND: ${{ ((github.event_name == 'workflow_dispatch' && inputs.formal_run != true) || github.run_attempt > 1) && 'true' || 'false' }}
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
       FUND_WATCH_USER_ID: ${{ secrets.FUND_WATCH_USER_ID }}
