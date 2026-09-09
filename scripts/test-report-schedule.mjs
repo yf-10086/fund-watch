@@ -57,5 +57,23 @@ assert.equal(
   }),
   true
 );
+assert.equal(
+  isFormalReportSentAt({
+    sentAt: '',
+    reportDate: '2026-08-27',
+    mode: 'evening',
+    ...profile
+  }),
+  false
+);
+assert.equal(
+  isFormalReportSentAt({
+    sentAt: undefined,
+    reportDate: '2026-08-27',
+    mode: 'preclose',
+    ...profile
+  }),
+  false
+);
 
 console.log('定时报告日期、补发和去重测试通过。');

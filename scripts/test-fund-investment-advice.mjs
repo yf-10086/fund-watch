@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { buildFundInvestmentAmountAdvice } from '../app/lib/fundDecisionEngine.mjs';
+import { analyzeFundPortfolio, buildFundInvestmentAmountAdvice } from '../app/lib/fundDecisionEngine.mjs';
 
 const baseAnalysis = {
   profile: {
@@ -54,5 +54,23 @@ const unconfiguredAdvice = buildFundInvestmentAmountAdvice({
   decisions: []
 });
 assert.equal(unconfiguredAdvice.status, 'unconfigured');
+
+const blankEstimateAnalysis = analyzeFundPortfolio({
+  funds: [{ code: '000003', name: '空估值回退测试基金', gsz: '', dwjz: 1.1, gszzl: '' }],
+  holdings: { '000003': { share: 100, cost: 1 } },
+  profile: {
+    riskMode: 'custom',
+    riskLossLimit: 50,
+    totalInvestment: 10000,
+    minCashReserve: 0,
+    singleFundCap: 100,
+    qdiiCap: 100
+  }
+});
+const blankEstimateDecision = blankEstimateAnalysis.decisions[0];
+assert.equal(blankEstimateDecision.nav, 1.1);
+assert.ok(Math.abs(blankEstimateDecision.marketValue - 110) < 1e-9);
+assert.ok(Math.abs(blankEstimateDecision.profitPct - 10) < 1e-9);
+assert.notEqual(blankEstimateDecision.action, '触发风险警戒');
 
 console.log('按计划金额生成投资建议测试通过。');
