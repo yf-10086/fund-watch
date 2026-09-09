@@ -137,8 +137,17 @@ export function detectFundCategory(fund) {
 
 function finiteNumber(...values) {
   for (const value of values) {
+    if (value == null || (typeof value === 'string' && value.trim() === '')) continue;
     const number = Number(value);
     if (Number.isFinite(number)) return number;
+  }
+  return null;
+}
+
+function positiveFiniteNumber(...values) {
+  for (const value of values) {
+    const number = finiteNumber(value);
+    if (number != null && number > 0) return number;
   }
   return null;
 }
@@ -178,7 +187,7 @@ export function analyzeFundPortfolio({ funds, holdings, profile, trends = {} }) 
     const trend = trendForCode(trends, code);
     const share = finiteNumber(holding?.share, 0) || 0;
     const costNav = finiteNumber(holding?.cost);
-    const nav = finiteNumber(fund?.gsz, fund?.dwjz, fund?.nav);
+    const nav = positiveFiniteNumber(fund?.gsz, fund?.dwjz, fund?.nav);
     const dayChange = finiteNumber(fund?.gszzl, fund?.zzl);
     const marketValue = nav != null && share > 0 ? nav * share : 0;
     const totalCost = costNav != null && share > 0 ? costNav * share : 0;

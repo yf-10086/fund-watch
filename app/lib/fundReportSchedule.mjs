@@ -67,7 +67,7 @@ export function resolveReportTiming({
 
 export function isFormalReportSentAt({ sentAt, reportDate, mode, eveningReportHour, reminderLeadMinutes }) {
   const sentTime = new Date(sentAt).getTime();
-  if (!Number.isFinite(sentTime)) return true;
+  if (!Number.isFinite(sentTime)) return false;
 
   if (mode === 'evening') {
     const formalStart = new Date(
